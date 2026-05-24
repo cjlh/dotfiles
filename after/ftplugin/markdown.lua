@@ -3,9 +3,9 @@ local colorscheme = "nordic"
 local ok, _ = pcall(vim.api.nvim_command, "colorscheme " .. colorscheme)
 
 if ok then
-    for _, group in ipairs({ "Normal", "NormalFloat" }) do
+    for _, group in ipairs({ "Normal", "NormalFloat", "SignColumn" }) do
       vim.api.nvim_set_hl(0, group, { bg = "none" })
-    end 
+    end
 else
     print("error setting colorscheme")
 end

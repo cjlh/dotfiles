@@ -4,3 +4,5 @@ require('mini.completion').setup({
   delay = { completion = 100, info = 1000, signature = 500 },
 })
 
+require('mini.snippets').setup({})
+

@@ -23,11 +23,26 @@ vim.o.shiftwidth = 4 -- Number of spaces inserted when indenting
 vim.o.number = true
 -- vim.o.relativenumber = true
 
+vim.o.ignorecase = true
+vim.o.smartcase = true
+vim.o.hlsearch = true
+vim.o.incsearch = true
+
+vim.wo.scrolloff = 8
+
+vim.o.splitbelow = true
+vim.o.splitright = true
+
+vim.o.termguicolors = true
+
+vim.opt.completeopt = { "menu", "menuone", "noselect" }
+vim.o.wildmenu = true
 vim.opt.wildmode = "longest:full,full"
 
+-- vim.o.winborder = "rounded"
+
 -- Disable background colour
---                            also "SignColumn"
-for _, group in ipairs({ "Normal", "NormalFloat" }) do
+for _, group in ipairs({ "Normal", "NormalFloat", "SignColumn" }) do
   vim.api.nvim_set_hl(0, group, { bg = "none" })
 end
 
