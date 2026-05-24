@@ -73,6 +73,5 @@ return {
     { 'nvim-mini/mini.completion', version = '*' },
     { "tpope/vim-fugitive" },
     { "neovim/nvim-lspconfig" },
-    { "gelguy/wilder.nvim" },
 }
 

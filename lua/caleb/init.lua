@@ -39,7 +39,12 @@ vim.opt.completeopt = { "menu", "menuone", "noselect" }
 vim.o.wildmenu = true
 vim.opt.wildmode = "longest:full,full"
 
--- vim.o.winborder = "rounded"
+vim.o.winborder = "rounded"
+vim.o.pumborder = "rounded"
+vim.o.pumblend = 0
+
+vim.api.nvim_set_hl(0, 'Pmenu', { bg = 'NONE' })
+vim.api.nvim_set_hl(0, 'PmenuBorder', { bg = 'NONE' })
 
 -- Disable background colour
 for _, group in ipairs({ "Normal", "NormalFloat", "SignColumn" }) do
