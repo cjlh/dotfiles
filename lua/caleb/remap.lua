@@ -11,10 +11,14 @@ vim.keymap.set({ "n", "v" }, "<leader>P", '"+P')
 vim.keymap.set({ "n", "v" }, "d", '"_d')
 vim.keymap.set({ "n", "v" }, "<leader>d", "d")
 
+-- Clear highlights and redraw
 vim.keymap.set("n", "<C-L>", function()
     vim.cmd.nohlsearch()
     vim.cmd("redraw")
 end)
+
+-- Fix InsertLeave not firing
+vim.keymap.set("i", "<C-c>", "<Esc>")
 
 vim.keymap.set("n", "<leader>F", vim.lsp.buf.format)
 
