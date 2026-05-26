@@ -15,6 +15,15 @@ vim.lsp.config('lua_ls', {
     },
 })
 
+vim.lsp.config('ruff', {
+    init_options = {
+        settings = {
+            lint = { enable = false },
+        },
+    },
+})
+
+vim.lsp.enable('ruff')
 vim.lsp.enable('basedpyright')
 vim.lsp.enable('lua_ls')
 
