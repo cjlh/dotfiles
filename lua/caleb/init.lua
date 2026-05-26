@@ -53,3 +53,6 @@ for _, group in ipairs({ "Normal", "NormalFloat", "SignColumn" }) do
   vim.api.nvim_set_hl(0, group, { bg = "none" })
 end
 
+-- Disable welcome message
+vim.opt.shortmess:append("I")
+
