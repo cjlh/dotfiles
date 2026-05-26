@@ -27,8 +27,8 @@ vim.pack.add({
 
 -- Mini
 vim.pack.add({
-    'https://github.com/nvim-mini/mini.snippets',
-    'https://github.com/nvim-mini/mini.completion',
+    { src = 'https://github.com/nvim-mini/mini.snippets',  version = 'stable' },
+    { src = 'https://github.com/nvim-mini/mini.completion', version = 'stable' },
 })
 
 -- Language support
