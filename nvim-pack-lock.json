@@ -17,9 +17,18 @@
       "rev": "9a08aa14e02abb790c823a622d7d6c736cbbe65a",
       "src": "https://github.com/nvim-mini/mini.snippets"
     },
+    "neo-tree.nvim": {
+      "rev": "83e7a2982fd12b9c3d35bc39dd5877cd91a02a61",
+      "src": "https://github.com/nvim-neo-tree/neo-tree.nvim",
+      "version": "3.0.0 - 4.0.0"
+    },
     "nordic.nvim": {
       "rev": "9fb62116b891184049c50ca6ffb0d3bc100a1a6e",
       "src": "https://github.com/AlexvZyl/nordic.nvim"
+    },
+    "nui.nvim": {
+      "rev": "de740991c12411b663994b2860f1a4fd0937c130",
+      "src": "https://github.com/MunifTanjim/nui.nvim"
     },
     "nvim-lspconfig": {
       "rev": "a4ed4e761c400849e8c9f8bda33e5083f890268c",
@@ -33,6 +42,10 @@
     "plenary.nvim": {
       "rev": "74b06c6c75e4eeb3108ec01852001636d85a932b",
       "src": "https://github.com/nvim-lua/plenary.nvim"
+    },
+    "telescope-file-browser.nvim": {
+      "rev": "3610dc7dc91f06aa98b11dca5cc30dfa98626b7e",
+      "src": "https://github.com/nvim-telescope/telescope-file-browser.nvim"
     },
     "telescope-fzf-native.nvim": {
       "rev": "b25b749b9db64d375d782094e2b9dce53ad53a40",
