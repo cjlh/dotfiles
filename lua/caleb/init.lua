@@ -1,4 +1,4 @@
-require("caleb.remap")
+require("caleb.remaps")
 require("caleb.packages")
 
 vim.opt.tabstop = 4      -- Tab char looks like 4 spaces
