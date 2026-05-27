@@ -50,3 +50,9 @@ vim.pack.add({
     'https://github.com/tpope/vim-fugitive',
 })
 
+-- Support viewing images
+vim.pack.add({
+    -- 'https://github.com/3rd/image.nvim'
+    'https://github.com/folke/snacks.nvim'
+})
+

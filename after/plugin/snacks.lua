@@ -1,0 +1,4 @@
+require('snacks').setup({
+    image = {},
+})
+
