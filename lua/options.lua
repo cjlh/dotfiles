@@ -45,15 +45,9 @@ vim.opt.winborder = 'rounded'
 vim.opt.pumborder = 'rounded'
 vim.opt.pumblend = 0
 
+vim.opt.background = 'dark'
+
 vim.opt.updatetime = 50
-
-vim.api.nvim_set_hl(0, 'Pmenu', { bg = 'none' })
-vim.api.nvim_set_hl(0, 'PmenuBorder', { bg = 'none' })
-
--- Disable background colour
-for _, group in ipairs { 'Normal', 'NormalFloat', 'SignColumn' } do
-    vim.api.nvim_set_hl(0, group, { bg = 'none' })
-end
 
 -- Disable welcome message
 vim.opt.shortmess:append 'I'

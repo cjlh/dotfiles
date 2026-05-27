@@ -1,3 +1,4 @@
 require 'remaps'
 require 'packages'
-require 'settings'
+require 'options'
+require 'colours'

@@ -49,7 +49,9 @@ vim.pack.add {
 
 -- Themes
 vim.pack.add {
-    'https://github.com/AlexvZyl/nordic.nvim',
+    -- 'https://github.com/AlexvZyl/nordic.nvim',
+    -- 'https://github.com/Mofiqul/vscode.nvim',
+    'https://github.com/vague-theme/vague.nvim',
 }
 
 -- File management
