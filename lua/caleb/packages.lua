@@ -22,7 +22,6 @@ vim.pack.add({
     'https://github.com/nvim-telescope/telescope.nvim',
     'https://github.com/nvim-telescope/telescope-fzf-native.nvim',
     'https://github.com/debugloop/telescope-undo.nvim',
-    'https://github.com/nvim-telescope/telescope-file-browser.nvim',
 })
 
 -- Mini

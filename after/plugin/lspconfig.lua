@@ -9,7 +9,7 @@ vim.lsp.config('lua_ls', {
     settings = {
         Lua = {
             diagnostics = {
-                globals = { "vim", "describe", "it", "before_each", "after_each" },
+                globals = { "vim", "describe", "it", "before_each", "after_each", "Snacks" },
             },
         },
     },
