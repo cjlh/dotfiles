@@ -1,5 +1,9 @@
 {
   "plugins": {
+    "conform.nvim": {
+      "rev": "619363c30309d29ffa631e67c8183f2a72caa373",
+      "src": "https://github.com/stevearc/conform.nvim"
+    },
     "harpoon": {
       "rev": "87b1a3506211538f460786c23f98ec63ad9af4e5",
       "src": "https://github.com/ThePrimeagen/harpoon",

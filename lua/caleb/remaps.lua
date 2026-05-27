@@ -37,7 +37,5 @@ end, { desc = "Open LSP definition in new tab" })
 -- Fix InsertLeave not firing
 vim.keymap.set("i", "<C-c>", "<Esc>")
 
-vim.keymap.set("n", "<leader>F", vim.lsp.buf.format, { desc = "Apply LSP formatting" })
-
 vim.keymap.set("n", "<leader>s", ':%s/', { desc = "Begin grep in file" })
 

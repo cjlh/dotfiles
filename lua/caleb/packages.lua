@@ -40,6 +40,7 @@ vim.pack.add({
     { src = 'https://github.com/nvim-treesitter/nvim-treesitter', version = 'main' },
     'https://github.com/mason-org/mason.nvim',
     'https://github.com/neovim/nvim-lspconfig',
+    'https://github.com/stevearc/conform.nvim',
 })
 
 -- Themes
