@@ -56,7 +56,7 @@ vim.pack.add({
 
 -- Support viewing images
 vim.pack.add({
-    -- 'https://github.com/3rd/image.nvim'
-    'https://github.com/folke/snacks.nvim'
+    'https://github.com/folke/snacks.nvim',
+    'https://github.com/nvim-tree/nvim-web-devicons',
 })
 
