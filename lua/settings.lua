@@ -1,6 +1,3 @@
-require("caleb.remaps")
-require("caleb.packages")
-
 vim.opt.tabstop = 4      -- Tab char looks like 4 spaces
 vim.opt.expandtab = true -- Tab key inserts spaces instead of a tab char
 vim.opt.softtabstop = 4  -- Number of spaces inserted instead of tab char
@@ -15,6 +12,10 @@ vim.opt.undofile = true
 
 vim.opt.number = true
 -- vim.opt.relativenumber = true
+
+-- Show whitespace
+vim.opt.list = true
+vim.opt.listchars = { lead = '⋅', trail = '⋅', tab = '  ↦' }
 
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
@@ -35,6 +36,7 @@ vim.opt.termguicolors = true
 vim.opt.completeopt = { "menu", "menuone", "noselect" }
 vim.opt.wildmenu = true
 vim.opt.wildmode = "longest:full,full"
+vim.opt.wildignore:append('.DS_Store')
 
 -- Enable @ characters in filenames
 vim.opt.isfname:append("@-@")
