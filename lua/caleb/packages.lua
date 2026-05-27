@@ -16,6 +16,11 @@ vim.api.nvim_create_autocmd('PackChanged', {
     end,
 })
 
+-- Show keymap
+vim.pack.add({
+    'https://github.com/folke/which-key.nvim',
+})
+
 -- Telescope
 vim.pack.add({
     'https://github.com/nvim-lua/plenary.nvim',

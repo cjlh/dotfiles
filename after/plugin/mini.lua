@@ -4,9 +4,9 @@ require('mini.completion').setup({})
 
 require('mini.snippets').setup({})
 
-vim.api.nvim_create_autocmd("FileType",{
-    pattern="snacks_picker_input",
-    desc="Disable mini.completion for snacks picker",
-    group=vim.api.nvim_create_augroup("user_mini",{}),
-    command="lua vim.b.minicompletion_disable=true",
+vim.api.nvim_create_autocmd("FileType", {
+    pattern = "snacks_picker_input",
+    desc = "Disable mini.completion for snacks picker",
+    group = vim.api.nvim_create_augroup("user_mini", {}),
+    command = "lua vim.b.minicompletion_disable=true",
 })

@@ -56,6 +56,10 @@
       "rev": "3b753cf8c6a4dcde6edee8827d464ba9b8c4a6f0",
       "src": "https://github.com/tpope/vim-fugitive"
     },
+    "which-key.nvim": {
+      "rev": "3aab2147e74890957785941f0c1ad87d0a44c15a",
+      "src": "https://github.com/folke/which-key.nvim"
+    },
     "wilder.nvim": {
       "rev": "679f348dc90d80ff9ba0e7c470c40a4d038dcecf",
       "src": "https://github.com/gelguy/wilder.nvim"
