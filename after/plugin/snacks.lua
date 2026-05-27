@@ -1,5 +1,6 @@
 require("snacks").setup({
     image = {},
+    scroll = {},
     picker = {
         hidden = true,
         ignored = true,
