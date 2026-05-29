@@ -12,19 +12,6 @@ local exclude_dirs = {
     'target/',
 }
 
-local search_exclude_transform = function(item, ctx)
-    if ctx.filter:is_empty() then
-        return
-    end
-    local path = item.file or ''
-    for _, dir in ipairs(exclude_dirs) do
-        local name = dir:gsub('/+$', '')
-        if path:find('/' .. name .. '/', 1, true) or path:sub(-(#name + 1)) == '/' .. name then
-            return false
-        end
-    end
-end
-
 require('snacks').setup {
     image = {},
     scroll = {},
@@ -45,7 +32,10 @@ require('snacks').setup {
                         title = 'Explorer',
                     },
                 },
-                transform = search_exclude_transform,
+                finder = function(opts, ctx)
+                    opts.exclude = ctx.filter:is_empty() and {} or exclude_dirs
+                    return require('snacks.picker.source.explorer').explorer(opts, ctx)
+                end,
             },
         },
     },
