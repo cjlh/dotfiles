@@ -3,12 +3,27 @@ local exclude_dirs = {
     '.git/',
     'node_modules/',
     '__pycache__/',
+    '.pytest_cache/',
+    '.ruff_cache/',
     '.venv/',
     'venv/',
     'dist/',
     'build/',
     'target/',
 }
+
+local search_exclude_transform = function(item, ctx)
+    if ctx.filter:is_empty() then
+        return
+    end
+    local path = item.file or ''
+    for _, dir in ipairs(exclude_dirs) do
+        local name = dir:gsub('/+$', '')
+        if path:find('/' .. name .. '/', 1, true) or path:sub(-(#name + 1)) == '/' .. name then
+            return false
+        end
+    end
+end
 
 require('snacks').setup {
     image = {},
@@ -30,9 +45,7 @@ require('snacks').setup {
                         title = 'Explorer',
                     },
                 },
-            },
-            grep = {
-                exclude = exclude_dirs,
+                transform = search_exclude_transform,
             },
         },
     },
