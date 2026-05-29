@@ -1,13 +1,13 @@
 local exclude_dirs = {
-    '.DS_Store',
-    '.git',
-    'node_modules',
-    '__pycache__',
-    '.venv',
-    'venv',
-    'dist',
-    'build',
-    'target',
+    '.DS_Store/',
+    '.git/',
+    'node_modules/',
+    '__pycache__/',
+    '.venv/',
+    'venv/',
+    'dist/',
+    'build/',
+    'target/',
 }
 
 require('snacks').setup {
@@ -30,6 +30,9 @@ require('snacks').setup {
                         title = 'Explorer',
                     },
                 },
+            },
+            grep = {
+                exclude = exclude_dirs,
             },
         },
     },
