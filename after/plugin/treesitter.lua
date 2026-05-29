@@ -21,3 +21,10 @@ require('nvim-treesitter').install {
     'markdown',
     'markdown_inline',
 }
+
+vim.api.nvim_create_autocmd('FileType', {
+    desc = 'Enable treesitter highlighting',
+    callback = function(ev)
+        pcall(vim.treesitter.start, ev.buf)
+    end,
+})
