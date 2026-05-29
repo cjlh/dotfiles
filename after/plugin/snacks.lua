@@ -63,9 +63,15 @@ end)()
 
 vim.keymap.set('n', '<leader>rf', function()
     Snacks.picker.recent {
+        limit = 50, -- Limit applies pre-filter
         filter = {
             cwd = true,
             paths = recent_exclude_paths,
+            -- Filter out entries which aren't readable files
+            filter = function(item)
+                local file = item.file
+                return file ~= nil and file ~= '' and not file:match '^%w[%w+.-]*://' and vim.fn.filereadable(file) == 1
+            end,
         },
     }
 end, { desc = 'Open recent project files (Snacks)' })
