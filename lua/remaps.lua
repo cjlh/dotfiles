@@ -1,6 +1,15 @@
 vim.g.mapleader = ' '
 vim.g.maplocalleader = '\\'
 
+-- Allow capital Q to quit - pass through bang arg to allow `:Q!` and `:Qa!`
+vim.api.nvim_create_user_command('Q', function(opts)
+    vim.cmd { cmd = 'q', bang = opts.bang }
+end, { bang = true })
+
+vim.api.nvim_create_user_command('Qa', function(opts)
+    vim.cmd { cmd = 'qa', bang = opts.bang }
+end, { bang = true })
+
 -- Copy, cut and paste to system clipboard
 vim.keymap.set({ 'n', 'v' }, '<leader>y', '"+y', { desc = 'Yank from system clipboard' })
 vim.keymap.set({ 'n', 'v' }, '<leader>x', '"+d', { desc = 'Cut from system clipboard' })
