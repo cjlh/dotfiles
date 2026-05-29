@@ -95,3 +95,24 @@ end, { desc = 'Open recent project files (Snacks)' })
 vim.keymap.set('n', '<leader>rp', function()
     Snacks.picker.projects {}
 end, { desc = 'Open recent projects (Snacks)' })
+
+vim.api.nvim_create_autocmd('QuitPre', {
+    desc = 'Quit Neovim when only the Snacks explorer remains',
+    callback = function()
+        local snacks_wins, floating_wins = {}, {}
+        local wins = vim.api.nvim_list_wins()
+        for _, win in ipairs(wins) do
+            local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+            if ft:find '^snacks_' then
+                table.insert(snacks_wins, win)
+            elseif vim.api.nvim_win_get_config(win).relative ~= '' then
+                table.insert(floating_wins, win)
+            end
+        end
+        if #wins - #floating_wins - #snacks_wins == 1 then
+            for _, win in ipairs(snacks_wins) do
+                pcall(vim.api.nvim_win_close, win, true)
+            end
+        end
+    end,
+})
