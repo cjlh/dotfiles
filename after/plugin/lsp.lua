@@ -31,12 +31,12 @@ vim.lsp.config('lua_ls', {
 })
 
 vim.lsp.config('ruff', {
-    init_options = {
-        -- logLevel = 'debug',
-        settings = {
-            -- lint = { enable = false },
-        },
-    },
+    -- init_options = {
+    --     -- logLevel = 'debug',
+    --     settings = {
+    --         lint = { enable = false },
+    --     },
+    -- },
 })
 
 vim.lsp.config('basedpyright', {
