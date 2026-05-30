@@ -1,6 +1,7 @@
 local whichkey = require 'which-key'
 
 whichkey.setup {
+    delay = 2500,
     win = {
         border = 'rounded',
     },
