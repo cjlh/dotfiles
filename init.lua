@@ -8,4 +8,5 @@ vim.g.loaded_node_provider = 0
 require 'remaps'
 require 'packages'
 require 'options'
+require 'autocmd'
 require 'colours'
