@@ -106,3 +106,27 @@ vim.api.nvim_create_autocmd('QuitPre', {
         end
     end,
 })
+
+vim.api.nvim_create_autocmd('QuickFixCmdPost', {
+    desc = 'Open builtin QuickFix commands using Snacks.picker',
+    pattern = 'cgetexpr,cexpr,grep,grepadd,make,vimgrep,vimgrepadd',
+    callback = function()
+        Snacks.picker.qflist()
+    end,
+})
+
+vim.keymap.set('n', 'grr', function()
+    Snacks.picker.lsp_references()
+end, { desc = 'Open LSP references (Snacks)' })
+
+vim.keymap.set('n', 'gri', function()
+    Snacks.picker.lsp_implementations()
+end, { desc = 'Open LSP implementations (Snacks)' })
+
+vim.keymap.set('n', 'grt', function()
+    Snacks.picker.lsp_type_definitions()
+end, { desc = 'Open LSP type definitions (Snacks)' })
+
+vim.keymap.set('n', 'gd', function()
+    Snacks.picker.lsp_definitions()
+end, { desc = 'Open LSP definitions (Snacks)' })
