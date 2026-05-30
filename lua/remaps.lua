@@ -46,3 +46,5 @@ end, { desc = 'Open LSP definition in new tab' })
 vim.keymap.set('i', '<C-c>', '<Esc>')
 
 vim.keymap.set('n', '<leader>s', ':%s/', { desc = 'Begin grep in file' })
+
+vim.keymap.set('n', '<leader>v', 'vin', { remap = true, desc = 'Select word/symbol under cursor' })
