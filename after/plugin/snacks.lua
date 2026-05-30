@@ -38,6 +38,7 @@ require('snacks').setup {
                     },
                 },
                 layout = {
+                    hidden = { 'input' },
                     auto_hide = { 'input' },
                 },
                 finder = function(opts, ctx)
