@@ -130,3 +130,21 @@ end, { desc = 'Open LSP type definitions (Snacks)' })
 vim.keymap.set('n', 'gd', function()
     Snacks.picker.lsp_definitions()
 end, { desc = 'Open LSP definitions (Snacks)' })
+
+vim.keymap.set('n', 'gD', function()
+    Snacks.picker.lsp_declarations()
+end, { desc = 'Open LSP declarations (Snacks)' })
+
+vim.keymap.set('n', 'gO', function()
+    Snacks.picker.lsp_symbols()
+end, { desc = 'Open LSP document symbols (Snacks)' })
+
+-- No Neovim default for the following
+
+vim.keymap.set('n', '<leader>ci', function()
+    Snacks.picker.lsp_incoming_calls()
+end, { desc = 'Open LSP incoming calls (Snacks)' })
+
+vim.keymap.set('n', '<leader>co', function()
+    Snacks.picker.lsp_outgoing_calls()
+end, { desc = 'Open outgoing LSP calls (Snacks)' })
