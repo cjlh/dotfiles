@@ -15,6 +15,12 @@ local exclude_dirs = {
 require('snacks').setup {
     image = {},
     scroll = {},
+    terminal = {
+        win = {
+            border = 'rounded',
+            position = 'float',
+        },
+    },
     picker = {
         hidden = true,
         ignored = true,
@@ -27,10 +33,12 @@ require('snacks').setup {
             },
             explorer = {
                 win = {
-                    border = 'bottom',
                     input = {
                         title = 'Explorer',
                     },
+                },
+                layout = {
+                    auto_hide = { 'input' },
                 },
                 finder = function(opts, ctx)
                     opts.exclude = ctx.filter:is_empty() and {} or exclude_dirs
@@ -43,6 +51,10 @@ require('snacks').setup {
         replace_netrw = true,
     },
 }
+
+vim.keymap.set({ 'n', 't' }, '<C-/>', function()
+    Snacks.terminal.toggle()
+end, { desc = 'Toggle terminal (Snacks)' })
 
 vim.keymap.set('n', '<leader><leader>', function()
     Snacks.picker.files()
