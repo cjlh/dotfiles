@@ -2,6 +2,26 @@
 -- https://docs.basedpyright.com/v1.21.0/installation/ides/
 -- https://docs.astral.sh/ruff/editors/setup/#neovim
 
+--[[
+    See `:help lsp-defaults` for all defaults. Default keymaps:
+      - "gra" (Normal and Visual mode) is mapped to |vim.lsp.buf.code_action()|
+      - "gri" is mapped to |vim.lsp.buf.implementation()|
+      - "grn" is mapped to |vim.lsp.buf.rename()|
+      - "grr" is mapped to |vim.lsp.buf.references()|
+      - "grt" is mapped to |vim.lsp.buf.type_definition()|
+      - "grx" is mapped to |vim.lsp.codelens.run()|
+      - "gO" is mapped to |vim.lsp.buf.document_symbol()|
+      - CTRL-S (Insert mode) is mapped to |vim.lsp.buf.signature_help()|
+      - |v_an| and |v_in| fall back to LSP |vim.lsp.buf.selection_range()| if
+        treesitter is not active.
+      - |gx| handles `textDocument/documentLink`. Example: with gopls, invoking gx
+        on "os" in this Go code will open documentation externally: >
+          package nvim
+          import (
+             "os"
+          )
+]]
+
 require('conform').setup {
     format_on_save = {
         timeout_ms = 500,
@@ -72,6 +92,3 @@ end, { desc = 'Hover documentation (LSP)' })
 vim.keymap.set('n', '<leader>F', function()
     require('conform').format()
 end, { desc = 'Format and apply autofixes (Conform)' })
-
-vim.api.nvim_set_keymap('n', 'gD', '<cmd>lua vim.lsp.buf.declaration()<CR>', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<CR>', { noremap = true, silent = true })
