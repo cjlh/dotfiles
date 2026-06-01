@@ -13,6 +13,9 @@ vim.opt.undofile = true
 vim.opt.number = true
 -- vim.opt.relativenumber = true
 
+vim.opt.cursorline = true
+vim.opt.cursorlineopt = 'number'
+
 -- Show whitespace
 vim.opt.list = true
 vim.opt.listchars = { lead = '⋅', trail = '⋅', tab = '  ↦' }
