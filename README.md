@@ -25,4 +25,7 @@ stow neovim
 
 # Kitty terminal
 stow kitty
+
+# Fish shell
+stow fish
 ```
