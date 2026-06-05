@@ -18,4 +18,7 @@ stow -nv */
 # Neovim
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
 stow neovim
+
+# Kitty terminal
+stow kitty
 ```
