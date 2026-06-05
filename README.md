@@ -1,9 +1,9 @@
-# neovim-config
+# dotfiles
 
 ## Installation
 
 ```
+# Neovim
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
-git clone git@github.com:cjlh/neovim-config.git ~/.config/nvim
+ln -s dotfiles/neovim ~/.config/nvim
 ```
-
