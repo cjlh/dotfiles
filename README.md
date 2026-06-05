@@ -19,16 +19,19 @@ stow -nv */
 ### Link configs
 
 ```sh
-# Neovim
+# Neovim (https://github.com/neovim/neovim)
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
 stow neovim
 
-# Kitty terminal
+# Kitty terminal (https://github.com/kovidgoyal/kitty)
 stow kitty
 
-# Fish shell
+# Fish shell (https://github.com/fish-shell/fish-shell)
 stow fish
 
-# Zed editor
+# Zed editor (https://github.com/zed-industries/zed)
 stow zed
+
+# OpenCode (https://github.com/anomalyco/opencode)
+stow opencode
 ```
