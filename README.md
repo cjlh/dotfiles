@@ -28,4 +28,7 @@ stow kitty
 
 # Fish shell
 stow fish
+
+# Zed editor
+stow zed
 ```
