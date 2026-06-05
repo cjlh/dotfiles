@@ -29,6 +29,12 @@ vim.opt.incsearch = true
 vim.opt.signcolumn = 'yes'
 vim.opt.colorcolumn = '90'
 
+vim.opt.foldcolumn = '0' -- Disable fold column as fold level numbers can't be disabled whilst keeping markers
+vim.opt.foldtext = ''
+vim.opt.foldmethod = 'expr'
+vim.opt.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+vim.opt.foldlevelstart = 99 -- Don't auto-fold any code when opening files
+
 vim.opt.scrolloff = 8
 
 vim.opt.splitbelow = true
