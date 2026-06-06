@@ -1,4 +1,5 @@
 # Video utilities - note hardcoded Mac font paths
+# Requires FFmpeg to be installed with freetype: `brew install ffmpeg-full`
 
 function count-frames
     if test (count $argv) -ne 2
@@ -27,34 +28,6 @@ fontcolor=white:\
 box=1:boxcolor=black@1.0:\
 boxborderw=h*$boxpad_ratio" \
         -c:a copy \
-        "$output"
-end
-
-# TODO remove once new script battle-tested
-function count-frames-old
-    if test (count $argv) -ne 2
-        echo "Usage: count-frames <input> <output>"
-        return 1
-    end
-
-    set input  $argv[1]
-    set output $argv[2]
-
-    # Scale relative to video height
-    set fontsize_ratio 0.06   # 6% of height
-    set pad_ratio      0.00   # margin from edges
-    set boxpad_ratio   0.015  # padding inside box
-
-    set fontfile "/System/Library/Fonts/Menlo.ttc"
-
-    ffmpeg -i "$input" \
-        -vf "drawtext=fontfile='$fontfile':text='%{frame_num}':\
-y_align=font:\
-fontsize=h*$fontsize_ratio:\
-x=w-tw-(h*$pad_ratio):\
-y=h-th-(h*$pad_ratio):\
-fontcolor=white:\
-box=1:boxcolor=black@1.0:boxborderw=h*$boxpad_ratio" \
         "$output"
 end
 
