@@ -45,11 +45,6 @@ end, { desc = 'Open LSP definition in new tab' })
 -- Fix InsertLeave not firing
 vim.keymap.set('i', '<C-c>', '<Esc>')
 
--- Close pop-up menus without entering normal mode
-vim.keymap.set('i', '<Esc>', function()
-    return vim.fn.pumvisible() == 1 and '<C-e>' or '<Esc>'
-end, { expr = true })
-
 vim.keymap.set('n', '<leader>s', ':%s/', { desc = 'Begin grep in file' })
 
 vim.keymap.set('n', '<leader>v', 'vin', { remap = true, desc = 'Select word/symbol under cursor' })
