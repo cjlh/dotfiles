@@ -57,7 +57,7 @@ vim.pack.add {
 
 -- File management
 vim.pack.add {
-    { src = 'https://github.com/ThePrimeagen/harpoon', version = 'harpoon2' },
+    -- { src = 'https://github.com/ThePrimeagen/harpoon', version = 'harpoon2' },
     'https://github.com/gelguy/wilder.nvim',
 }
 
