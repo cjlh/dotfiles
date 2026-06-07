@@ -79,10 +79,8 @@ vim.lsp.enable 'basedpyright'
 vim.lsp.enable 'lua_ls'
 
 vim.diagnostic.config {
-    virtual_text = false,
-    virtual_lines = {
-        -- current_line = true
-    },
+    virtual_text = true,
+    virtual_lines = false,
 }
 
 vim.keymap.set('n', 'K', function()
