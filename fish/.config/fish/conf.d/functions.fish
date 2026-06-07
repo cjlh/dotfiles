@@ -1,20 +1,5 @@
 # Utility functions
 
-function cd -w cd -d "automatically activate and deactivate virtualenvs"
-    builtin cd $argv
-    if test -e venv/bin/activate.fish
-        source venv/bin/activate.fish
-    else if test -e .venv/bin/activate.fish
-        source .venv/bin/activate.fish
-    else if set -q VIRTUAL_ENV
-        # returns 0 if subpath of dir containing current virtualenv, 1 otherwise
-        string match -q "$(string lower (path normalize "$VIRTUAL_ENV/.."))*" "$(string lower (pwd))"
-        if test $status -eq 1
-            deactivate
-        end
-    end
-end
-
 function mkcd
     mkdir -p $argv[1]
     if test -d "$argv[1]"
