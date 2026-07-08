@@ -1,3 +1,5 @@
+# TODO https://github.com/mathiasbynens/dotfiles/blob/main/.macos
+
 # -- Global preferences
 
 # Use cmd+ctrl to click-drag app windows
@@ -9,6 +11,9 @@ defaults write -g NSWindowShouldDragOnGesture -bool true
 defaults write com.apple.dock showhidden -bool true
 
 # -- Desktop and UI
+
+# Disable Stage Manager
+defaults write com.apple.WindowManager GloballyEnabled -bool false
 
 # Disable "Click wallpaper to show desktop" (sets to "Only in Stage Manager")
 defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
