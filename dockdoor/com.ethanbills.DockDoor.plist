@@ -6,6 +6,30 @@
 	<false/>
 	<key>SUSendProfileInfo</key>
 	<false/>
+	<key>UserKeybind</key>
+	<string>{"keyCode":48,"modifierFlags":524576}</string>
+	<key>alternateKeybindKey</key>
+	<integer>0</integer>
+	<key>alternateKeybindMode</key>
+	<string>activeAppOnly</string>
+	<key>bufferFromDock</key>
+	<real>-20</real>
+	<key>cmdShortcut1Action</key>
+	<string>close</string>
+	<key>cmdShortcut1Key</key>
+	<integer>13</integer>
+	<key>cmdShortcut2Action</key>
+	<string>minimize</string>
+	<key>cmdShortcut2Key</key>
+	<integer>46</integer>
+	<key>cmdShortcut3Action</key>
+	<string>quit</string>
+	<key>cmdShortcut3Key</key>
+	<integer>12</integer>
+	<key>cmdTabAutoSelectFirstWindow</key>
+	<false/>
+	<key>cmdTabCycleKey</key>
+	<integer>0</integer>
 	<key>compactModeHideTrafficLights</key>
 	<true/>
 	<key>compactModeItemSize</key>
@@ -16,29 +40,105 @@
 	<string>ultraThin</string>
 	<key>dockBackgroundStyle</key>
 	<string>frostedMaterial</string>
+	<key>dockClickAction</key>
+	<string>hide</string>
+	<key>dockLockOverrideModifier</key>
+	<integer>0</integer>
+	<key>dockSwipeAwayFromDockAction</key>
+	<string>maximize</string>
+	<key>dockSwipeTowardsDockAction</key>
+	<string>minimize</string>
+	<key>enableCmdRightClickQuit</key>
+	<true/>
+	<key>enableDockLocking</key>
+	<false/>
+	<key>enableDockPreviewGestures</key>
+	<true/>
 	<key>enableDockPreviews</key>
 	<false/>
+	<key>enableFolderWidget</key>
+	<false/>
+	<key>enablePinning</key>
+	<true/>
+	<key>enableShiftWindowSwitcherPlacement</key>
+	<false/>
+	<key>enableWindowSwitcher</key>
+	<true/>
 	<key>enableWindowSwitcherSearch</key>
 	<false/>
+	<key>fadeOutDuration</key>
+	<real>0.40000000000000002</real>
+	<key>folderWidgetDefaultSortOrder</key>
+	<string>dateModified</string>
+	<key>folderWidgetDefaultSortReversed</key>
+	<true/>
+	<key>folderWidgetRememberSortPerFolder</key>
+	<true/>
+	<key>folderWidgetShowHiddenFiles</key>
+	<false/>
+	<key>gestureSwipeThreshold</key>
+	<real>50</real>
 	<key>globalPaddingMultiplier</key>
 	<real>0.69999999999999996</real>
 	<key>groupAppInstancesInDock</key>
 	<false/>
+	<key>ignoreAppsWithSingleWindowInCmdTab</key>
+	<false/>
+	<key>includeHiddenWindowsInCmdTab</key>
+	<true/>
+	<key>includeHiddenWindowsInDockPreview</key>
+	<true/>
+	<key>includeHiddenWindowsInSwitcher</key>
+	<true/>
 	<key>instantWindowSwitcher</key>
 	<true/>
+	<key>limitSwitcherToFrontmostApp</key>
+	<false/>
 	<key>lockAspectRatio</key>
 	<true/>
+	<key>middleClickAction</key>
+	<string>close</string>
+	<key>openDelay</key>
+	<real>0.20000000000000001</real>
+	<key>openNewWindowForWindowlessApps</key>
+	<false/>
+	<key>preventDockHide</key>
+	<false/>
 	<key>previewHeight</key>
 	<real>375</real>
+	<key>previewHoverAction</key>
+	<string>none</string>
 	<key>previewWidth</key>
 	<real>600</real>
 	<key>reopenSettingsAfterRestart</key>
 	<false/>
+	<key>requireShiftTabToGoBack</key>
+	<false/>
+	<key>restoreAllMinimizedWindowsOnDockClick</key>
+	<true/>
+	<key>screenCaptureCacheLifespan</key>
+	<real>30</real>
+	<key>searchTriggerKey</key>
+	<integer>44</integer>
 	<key>selectionOpacity</key>
 	<real>0.40000000000000002</real>
+	<key>shouldHideOnDockItemClick</key>
+	<false/>
 	<key>showActiveAppIndicator</key>
 	<false/>
 	<key>showActiveWindowBorder</key>
+	<false/>
+	<key>showBigControlsWhenNoValidWindows</key>
+	<true/>
+	<key>showMassActionButtons</key>
+	<true/>
+	<key>showMenuBarIcon</key>
+	<true/>
+	<key>showSpecialAppControls</key>
+	<true/>
+	<key>showWindowlessAppsInCmdTab</key>
+	<false/>
+	<key>showWindowlessAppsInDockPreview</key>
 	<false/>
 	<key>showWindowlessAppsInSwitcher</key>
 	<false/>
@@ -52,11 +152,25 @@
 	<true/>
 	<key>switcherTrafficLightButtonsVisibility</key>
 	<string>never</string>
+	<key>tapEquivalentInterval</key>
+	<real>1.5</real>
 	<key>uniformCardRadius</key>
 	<false/>
 	<key>unselectedContentOpacity</key>
 	<real>0.85000000000000009</real>
+	<key>useClassicWindowOrdering</key>
+	<true/>
+	<key>useEmbeddedMediaControls</key>
+	<true/>
+	<key>windowPreviewImageScale</key>
+	<real>1</real>
+	<key>windowSwitcherAnchorToTop</key>
+	<false/>
+	<key>windowSwitcherHorizontalOffsetPercent</key>
+	<real>0.0</real>
 	<key>windowSwitcherPlacementStrategy</key>
 	<string>screenWithLastActiveWindow</string>
+	<key>windowSwitcherVerticalOffsetPercent</key>
+	<real>0.0</real>
 </dict>
 </plist>

@@ -19,6 +19,12 @@ blacklist=(
   lastKnownScreenRecordingPermission  # derived from the actual permission grant
   SUHasLaunchedBefore                 # Sparkle updater bookkeeping
   SULastCheckTime                     # Sparkle updater bookkeeping
+  filteredCalendarIdentifiers         # EventKit calendar IDs
+  folderWidgetSortOrders              # keyed by folder paths on disk
+  folderWidgetSortReversed            # keyed by folder paths on disk
+  lockedDockScreenIdentifier          # machine-specific display UUID
+  pinnedScreenIdentifier              # machine-specific display UUID
+  fullscreenAppBlacklist              # bundle IDs of excluded apps
 )
 
 for key in "${blacklist[@]}"; do
