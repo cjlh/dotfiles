@@ -36,4 +36,8 @@ stow zed
 # OpenCode (https://github.com/anomalyco/opencode)
 brew install anomalyco/tap/opencode
 stow opencode
+
+# DockDoor for alt+tab functionality on Mac (https://github.com/ejbills/DockDoor)
+brew install --cask dockdoor
+./dockdoor/apply_config.sh
 ```

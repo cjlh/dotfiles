@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUSendProfileInfo</key>
+	<false/>
+	<key>compactModeHideTrafficLights</key>
+	<true/>
+	<key>compactModeItemSize</key>
+	<integer>1</integer>
+	<key>disableImagePreview</key>
+	<true/>
+	<key>dockBackgroundMaterial</key>
+	<string>ultraThin</string>
+	<key>dockBackgroundStyle</key>
+	<string>frostedMaterial</string>
+	<key>enableDockPreviews</key>
+	<false/>
+	<key>enableWindowSwitcherSearch</key>
+	<false/>
+	<key>globalPaddingMultiplier</key>
+	<real>0.69999999999999996</real>
+	<key>groupAppInstancesInDock</key>
+	<false/>
+	<key>instantWindowSwitcher</key>
+	<true/>
+	<key>lockAspectRatio</key>
+	<true/>
+	<key>previewHeight</key>
+	<real>375</real>
+	<key>previewWidth</key>
+	<real>600</real>
+	<key>reopenSettingsAfterRestart</key>
+	<false/>
+	<key>selectionOpacity</key>
+	<real>0.40000000000000002</real>
+	<key>showActiveAppIndicator</key>
+	<false/>
+	<key>showActiveWindowBorder</key>
+	<false/>
+	<key>showWindowlessAppsInSwitcher</key>
+	<false/>
+	<key>switcherAppIconSize</key>
+	<real>0.0</real>
+	<key>switcherEnabledTrafficLightButtons</key>
+	<array/>
+	<key>switcherIgnoreScreenLimit</key>
+	<false/>
+	<key>switcherShowAppHeader</key>
+	<true/>
+	<key>switcherTrafficLightButtonsVisibility</key>
+	<string>never</string>
+	<key>uniformCardRadius</key>
+	<false/>
+	<key>unselectedContentOpacity</key>
+	<real>0.85000000000000009</real>
+	<key>windowSwitcherPlacementStrategy</key>
+	<string>screenWithLastActiveWindow</string>
+</dict>
+</plist>
