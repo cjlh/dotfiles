@@ -12,6 +12,7 @@ alias gs "git status"
 alias ga "git add"
 alias gl "git log -n 10 --oneline"
 alias gca "git commit --amend"
+alias gr "cd (git rev-parse --show-toplevel)"
 
 alias jj "just --unstable"
 alias oc "opencode"
