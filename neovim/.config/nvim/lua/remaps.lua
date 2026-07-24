@@ -42,6 +42,10 @@ vim.keymap.set('n', '<C-RightMouse>', function()
     vim.lsp.buf.definition()
 end, { desc = 'Open LSP definition in new tab' })
 
+-- Misc LSP actions
+vim.keymap.set('n', '<leader>R', vim.lsp.buf.rename, { desc = 'Rename symbol (LSP)' })
+vim.keymap.set({ 'n', 'v' }, '<leader>.', vim.lsp.buf.code_action, { desc = 'Show code actions (LSP)' })
+
 -- Fix InsertLeave not firing
 vim.keymap.set('i', '<C-c>', '<Esc>')
 

@@ -83,6 +83,9 @@ vim.diagnostic.config {
     virtual_lines = false,
 }
 
+vim.lsp.completion.enable()
+vim.lsp.inlay_hint.enable(true)
+
 vim.keymap.set('n', 'K', function()
     vim.lsp.buf.hover { border = 'rounded', max_height = 25, max_width = 120 }
 end, { desc = 'Hover documentation (LSP)' })
