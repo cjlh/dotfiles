@@ -1,5 +1,5 @@
--- Always jump to last known cursor position when opening file
 vim.api.nvim_create_autocmd('BufReadPost', {
+    desc = 'Always jump to last known cursor position when opening file',
     callback = function()
         local mark = vim.api.nvim_buf_get_mark(0, '"')
         local line_count = vim.api.nvim_buf_line_count(0)

@@ -49,9 +49,24 @@ require('snacks').setup {
         },
     },
     explorer = {
-        replace_netrw = true,
+        -- replace_netrw = true,
     },
 }
+
+local function toggle_explorer()
+    local explorers = Snacks.picker.get { source = 'explorer' }
+    if #explorers > 0 then
+        for _, picker in ipairs(explorers) do
+            picker:close()
+        end
+    else
+        Snacks.explorer.open()
+    end
+end
+
+vim.api.nvim_create_user_command('Explorer', toggle_explorer, { desc = 'Toggle the Snacks explorer' })
+
+vim.keymap.set('n', '<leader>e', toggle_explorer, { desc = 'Toggle explorer (Snacks)' })
 
 vim.keymap.set({ 'n', 't' }, '<C-/>', function()
     Snacks.terminal.toggle()
@@ -60,10 +75,6 @@ end, { desc = 'Toggle terminal (Snacks)' })
 vim.keymap.set('n', '<leader><leader>', function()
     Snacks.picker.files()
 end, { desc = 'Open file picker (Snacks)' })
-
-vim.keymap.set('n', '<leader>e', function()
-    Snacks.explorer()
-end, { desc = 'Open explorer (Snacks)' })
 
 vim.keymap.set('n', '<C-space>', function()
     Snacks.picker.grep()
