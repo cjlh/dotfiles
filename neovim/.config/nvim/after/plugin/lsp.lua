@@ -30,6 +30,21 @@ require('conform').setup {
     formatters_by_ft = {
         lua = { 'stylua' },
         python = { 'ruff_fix', 'ruff_format' },
+        markdown = { 'prettier' },
+        ['markdown.mdx'] = { 'prettier' },
+    },
+    formatters = {
+        prettier = {
+            prepend_args = {
+                '--prose-wrap',
+                'always',
+                '--print-width',
+                '120',
+                -- Do not format contents of code blocks
+                '--embedded-language-formatting',
+                'off',
+            },
+        },
     },
     default_format_opts = {
         lsp_format = 'fallback',
