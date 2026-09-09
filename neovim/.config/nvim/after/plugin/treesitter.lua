@@ -20,6 +20,7 @@ require('nvim-treesitter').install {
     'css',
     'markdown',
     'markdown_inline',
+    'json',
 }
 
 vim.api.nvim_create_autocmd('FileType', {

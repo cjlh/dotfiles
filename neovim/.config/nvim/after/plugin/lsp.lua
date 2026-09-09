@@ -32,6 +32,8 @@ require('conform').setup {
         python = { 'ruff_fix', 'ruff_format' },
         markdown = { 'prettier' },
         ['markdown.mdx'] = { 'prettier' },
+        json = { 'prettier ' },
+        jsonc = { 'prettier' },
     },
     formatters = {
         prettier = {
