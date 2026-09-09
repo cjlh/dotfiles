@@ -39,7 +39,7 @@ require('conform').setup {
                 '--prose-wrap',
                 'always',
                 '--print-width',
-                '120',
+                '90',
                 -- Do not format contents of code blocks
                 '--embedded-language-formatting',
                 'off',
