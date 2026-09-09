@@ -60,3 +60,6 @@ vim.opt.updatetime = 50
 
 -- Disable welcome message
 vim.opt.shortmess:append 'I'
+-- Disable messages like "Keyword completion (^N^P)"
+-- https://github.com/folke/noice.nvim/wiki/A-Guide-to-Messages#handling-hit-enter-messages
+vim.opt.shortmess:append 'c'
