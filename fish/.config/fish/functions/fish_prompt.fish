@@ -1,10 +1,10 @@
 function fish_prompt
     set_color normal
     printf "["
-    # set_color -o a8a8a8
-    # set_color -o 89728A
-    # set_color -o 55ff55
-    set_color -o ecf28f
+    # set_color a8a8a8
+    # set_color 89728A
+    # set_color 55ff55
+    set_color ecf28f
     printf "$USER"
     set_color normal
     set directory
