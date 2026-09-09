@@ -1,4 +1,10 @@
 {
   "$schema": "https://opencode.ai/tui.json",
-  "theme": "system"
+  "theme": "system",
+  "keybinds": {
+      // Default "shift+tab"
+      "agent_cycle_reverse": "none",
+      // Default "<leader>e"
+      "editor_open": "shift+tab"
+  }
 }
