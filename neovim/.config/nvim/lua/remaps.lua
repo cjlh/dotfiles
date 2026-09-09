@@ -17,8 +17,9 @@ vim.keymap.set({ 'n', 'v' }, '<leader>p', '"+p', { desc = 'Paste from system cli
 vim.keymap.set({ 'n', 'v' }, '<leader>P', '"+P', { desc = 'Paste from system clipboard before current' })
 
 -- Delete to blackhole register by default
-vim.keymap.set({ 'n', 'v' }, 'd', '"_d', { desc = 'Delete to blackhole register' })
-vim.keymap.set({ 'n', 'v' }, '<Del>', '"_x', { desc = 'Delete to blackhole register' })
+vim.keymap.set({ 'n', 'v' }, 'd', '"_d', { desc = 'Delete line or selection to blackhole register' })
+vim.keymap.set({ 'n', 'v' }, '<Del>', '"_x', { desc = 'Delete character or selection to blackhole register' })
+vim.keymap.set('n', 'x', '"_x', { desc = 'Cut single character to blackhole register' })
 
 -- Use leader-d for delete to clipboard
 vim.keymap.set({ 'n', 'v' }, '<leader>d', 'd', { desc = 'Delete to clipboard' })
