@@ -17,6 +17,10 @@ stow -nv */
 To install apps and link configs:
 
 ```sh
+# Utility scripts - `~/.local/bin/` must be on `PATH`
+brew install uv
+stow scripts
+
 # Neovim (https://github.com/neovim/neovim)
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
 stow neovim

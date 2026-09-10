@@ -1,0 +1,191 @@
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["rich"]
+# ///
+
+import argparse
+import difflib
+import subprocess
+import unicodedata
+
+from rich.console import Console
+from rich.text import Text
+
+
+# https://rich.readthedocs.io/en/stable/appendix/colors.html
+CHANGED_STYLE = "bold grey7 on cyan"
+UNCHANGED_STYLE = "grey46"
+GUTTER_STYLE = "cyan"
+SUMMARY_STYLE = "dim"
+
+# Replace typographic variants commonly found in generated text without
+# transliterating letters or otherwise changing the language of the content.
+CHARACTER_REPLACEMENTS = str.maketrans(
+    {
+        "\u00a0": " ",  # non-breaking space
+        "\u2007": " ",  # figure space
+        "\u202f": " ",  # narrow non-breaking space
+        "\u200b": "",  # zero-width space
+        "\ufeff": "",  # byte-order mark / zero-width no-break space
+        "‘": "'",  # left single quotation mark
+        "’": "'",  # right single quotation mark
+        "‚": "'",  # single low-9 quotation mark
+        "‛": "'",  # single high-reversed-9 quotation mark
+        "“": '"',  # left double quotation mark
+        "”": '"',  # right double quotation mark
+        "„": '"',  # double low-9 quotation mark
+        "‟": '"',  # double high-reversed-9 quotation mark
+        "‐": "-",  # hyphen
+        "‑": "-",  # non-breaking hyphen
+        "‒": "-",  # figure dash
+        "–": "-",  # en dash
+        "—": "--",  # em dash
+        "―": "--",  # horizontal bar
+        "…": "...",  # horizontal ellipsis
+    }
+)
+
+
+def normalise_text(text: str) -> str:
+    """Normalise Unicode and replace decorative punctuation with plain text."""
+    return unicodedata.normalize("NFC", text).translate(CHARACTER_REPLACEMENTS)
+
+
+def render_output(
+    original: str,
+    normalised: str,
+    console: Console,
+    omit_unchanged: bool = False,
+    no_show: bool = False,
+) -> Text:
+    """Render normalised lines with character-level change highlighting."""
+    displayed_lines: list[tuple[int, Text]] = []
+
+    changed_line_count = 0
+    edit_count = 0
+
+    original_lines = original.splitlines()
+    normalised_lines = normalised.splitlines()
+
+    for line_number, (before, after) in enumerate(
+        zip(original_lines, normalised_lines, strict=True), start=1
+    ):
+        changed = before != after
+
+        if changed:
+            changed_line_count += 1
+
+        if omit_unchanged and not changed:
+            continue
+
+        output_line = Text()
+
+        matcher = difflib.SequenceMatcher(None, before, after)
+
+        for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+            after_part = after[j1:j2]
+
+            if tag != "equal":
+                edit_count += 1
+
+            if tag == "delete":
+                _ = output_line.append("⌫", style=CHANGED_STYLE)
+            else:
+                _ = output_line.append(
+                    after_part,
+                    style=UNCHANGED_STYLE if tag == "equal" else CHANGED_STYLE,
+                )
+
+        if not no_show:
+            displayed_lines.append((line_number, output_line))
+
+    output = Text()
+
+    number_width = max((len(str(number)) for number, _ in displayed_lines), default=1)
+    gutter_width = number_width + 3
+    content_width = max(1, console.width - gutter_width)
+
+    physical_line_index = 0
+
+    for number, line in displayed_lines:
+        wrapped_lines = line.wrap(console, content_width, overflow="fold") or [Text()]
+
+        for wrapped_index, wrapped_line in enumerate(wrapped_lines):
+            if physical_line_index:
+                _ = output.append("\n")
+
+            label = str(number) if wrapped_index == 0 else ""
+
+            _ = output.append(f"{label:>{number_width}}", style=GUTTER_STYLE)
+            _ = output.append(" │ ", style=GUTTER_STYLE)
+            _ = output.append_text(wrapped_line)
+
+            physical_line_index += 1
+
+    if displayed_lines:
+        _ = output.append("\n\n")
+
+    if changed_line_count:
+        line_word = "line" if changed_line_count == 1 else "lines"
+        edit_word = "edit" if edit_count == 1 else "edits"
+
+        _ = output.append(
+            f"{edit_count} {edit_word} made across {changed_line_count} {line_word}",
+            style=SUMMARY_STYLE,
+        )
+    else:
+        _ = output.append("No changes made", style=SUMMARY_STYLE)
+
+    return output
+
+
+class Arguments(argparse.Namespace):
+    omit_unchanged: bool = False
+    no_show: bool = False
+
+
+def parse_arguments() -> Arguments:
+    parser = argparse.ArgumentParser(description="Normalise text from the clipboard.")
+    _ = parser.add_argument(
+        "--omit-unchanged",
+        action="store_true",
+        help="show only lines changed by normalisation",
+    )
+    _ = parser.add_argument(
+        "--no-show",
+        action="store_true",
+        help="hide output lines and show only the summary",
+    )
+    return parser.parse_args(namespace=Arguments())
+
+
+def paste_from_clipboard() -> str:
+    return subprocess.run(
+        ["pbpaste"], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def copy_to_clipboard(text: str) -> None:
+    _ = subprocess.run(["pbcopy"], input=text, text=True, check=True)
+
+
+if __name__ == "__main__":
+    args = parse_arguments()
+    raw = paste_from_clipboard()
+    normalised = normalise_text(raw)
+    console = Console()
+
+    console.print(
+        render_output(
+            raw,
+            normalised,
+            console,
+            omit_unchanged=args.omit_unchanged,
+            no_show=args.no_show,
+        ),
+        soft_wrap=True,
+    )
+    if raw != normalised:
+        copy_to_clipboard(normalised)
