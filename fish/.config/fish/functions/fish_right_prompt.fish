@@ -2,7 +2,7 @@ function fish_right_prompt
     set_color 95989d
 
     set -l length_limit 20
-    set -l branch_name (command git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    set -l branch_name (command git symbolic-ref --short HEAD 2>/dev/null)
 
     if test $status -eq 0
         if test (string length -- "$branch_name") -gt $length_limit
