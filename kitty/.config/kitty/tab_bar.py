@@ -59,7 +59,7 @@ class UsageSource:
                 with open(self.cache_path) as f:
                     cost = json.load(f)["totals"][self.cost_key]
 
-                self.text = f"{self.icon} {cost:,.2f}"
+                self.text = f"{self.icon} {max(0, cost):,.2f}"
             except (OSError, ValueError, KeyError, TypeError):
                 self.text = ""
 
