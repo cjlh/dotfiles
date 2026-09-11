@@ -10,6 +10,7 @@ alias vim "nvim"
 
 alias gs "git status"
 alias ga "git add"
+alias gd "git diff"
 alias gl "git log -n 10 --oneline"
 alias gca "git commit --amend"
 alias gr "cd (git rev-parse --show-toplevel)"

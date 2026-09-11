@@ -12,4 +12,7 @@ fish_add_path "/opt/homebrew/bin"
 fish_add_path "/Applications/Sublime Text.app/Contents/SharedSupport/bin"
 
 set -gx EDITOR nvim
+set -gx PAGER nvimpager
+set -gx MANPAGER 'nvim +Man!'
+
 set -gx HOMEBREW_NO_ANALYTICS 1

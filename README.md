@@ -25,6 +25,14 @@ stow scripts
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
 stow neovim
 
+# nvimpager (https://github.com/lucc/nvimpager)
+brew install nvimpager
+stow nvimpager
+
+# Git
+stow git
+git config --global include.path ~/.gitconfig.d/shared
+
 # Kitty terminal (https://github.com/kovidgoyal/kitty)
 brew install --cask kitty
 stow kitty

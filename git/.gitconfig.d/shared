@@ -1,0 +1,13 @@
+[core]
+    eol = lf
+    pager = nvimpager
+[init]
+	defaultBranch = master
+[color]
+    pager = false  ; disable terminal colour codes for use with nvim
+[pull]
+    rebase = true
+[rebase]
+    autoStash = true
+[rerere]
+    enabled = true
