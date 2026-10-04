@@ -22,6 +22,9 @@ defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool fa
 # To reset: `defaults delete com.apple.screencaptureui "thumbnailExpiration"`
 defaults write com.apple.screencaptureui "thumbnailExpiration" -float 20 && killall SystemUIServer
 
+# Allow dragging windows from arbitrary pointer locations with cmd+ctrl
+defaults write -g NSWindowShouldDragOnGesture -bool true
+
 # -- App-specific config
 
 # Use cmd+shift+x for strikethrough in Stickies.app
