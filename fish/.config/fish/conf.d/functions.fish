@@ -7,6 +7,10 @@ function mkcd
     end
 end
 
+function dusort
+    du -hs $argv[1]/* | sort -h
+end
+
 function git-stash-store
     # Save snapshot of working tree into the stash without modifying working tree
     # First argument (optional) is the stash message
