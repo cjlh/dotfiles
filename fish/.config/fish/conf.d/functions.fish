@@ -7,7 +7,7 @@ function mkcd
     end
 end
 
-function dusort
+function du-sort
     du -hs $argv[1]/* | sort -h
 end
 
@@ -34,6 +34,8 @@ function docker-stop-all
 end
 
 function docker-nuke
+    # If disk too full for Docker to start, delete virtual disk, i.e. at:
+    # ~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw
     docker buildx prune -af
     docker builder prune -af
     docker system prune -af --volumes
@@ -45,4 +47,91 @@ function j -d "use just command runner and rename terminal title"
         echo -n -e "\e]0;$argv (just)\a"
     end
     just $argv
+end
+
+function __du_work_heading
+    isatty stdout; and set_color --bold
+    echo $argv
+    isatty stdout; and set_color normal
+end
+
+function __du_work_human --argument-names kb
+    set -l size $kb
+    for unit in K M G T
+        if test (math --scale 0 $size) -lt 1024; or test $unit = T
+            printf "%.1f%s" $size $unit
+            return
+        end
+        set size (math $size / 1024)
+    end
+end
+
+function du-work --description "Disk usage of every repo/worktree root under ~/Work, sorted by size"
+    set -l base (path resolve ~/Work)
+    set -q argv[1]; and set base (path resolve $argv[1])
+
+    set -l live
+    isatty stdout; and set live 1
+    if set -q live[1]
+        # Use alternative screen for live progress so it can be rewriten without messing up buffer
+        printf "\e[?1049h"
+        # If interrupted, leave the alternate screen before the next prompt is drawn
+        function __du_work_restore --on-event fish_prompt
+            printf "\e[?1049l"
+            functions -e __du_work_restore
+        end
+    end
+
+    set -l results
+    set -l display
+    # `-prune` stops descent at git repo (.git dir present) or worktree (.git file present)
+    find $base -type d -exec test -e "{}/.git" ";" -print0 -prune 2>/dev/null \
+        | xargs -0 -n1 -P8 du -sk 2>/dev/null \
+        | while read -l -d \t kb root
+            set -a results $kb\t$root
+            set -a display (__du_work_human $kb)\t(string replace -- "$base/" "" $root)
+            set -q live[1]; or continue
+            # $LINES/$COLUMNS aren't refreshed while a function runs, so ask the terminal directly
+            set -l rows_cols (string split " " (stty size </dev/tty))
+            set -l n (count $display)
+            set -l start (math "max(1, $n - $rows_cols[1] + 3)")
+            printf "\e[?2026h\e[H\e[J"
+            printf "%d roots sized…\n" $n
+            string shorten -m (math $rows_cols[2] - 8) -- $display[$start..-1]
+            printf "\e[?2026l"
+        end
+
+    if set -q live[1]
+        printf "\e[?1049l"
+        functions -e __du_work_restore
+    end
+
+    __du_work_heading "All repos"
+    set -l total 0
+    set -l grouped
+    for result in (printf "%s\n" $results | sort -n)
+        set -l kb_root (string split -m1 \t -- $result)
+        set total (math $total + $kb_root[1])
+        printf "%s\t%s\n" (__du_work_human $kb_root[1]) (string replace -- "$base/" "" $kb_root[2])
+        # Worktrees share their main checkout's git dir, so group each root under that checkout
+        set -l main $kb_root[2]
+        set -l common_dir (git -C $main rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+        and set main (path dirname $common_dir)
+        set -a grouped $kb_root[1]\t(string replace -- "$base/" "" $main)
+    end
+
+    echo
+    __du_work_heading "Per repo"
+    printf "%s\n" $grouped \
+        | awk -F"\t" '{ kb[$2] += $1; n[$2]++ } END { for (repo in kb) print kb[repo] "\t" n[repo] "\t" repo }' \
+        | sort -n \
+        | while read -l -d \t kb n repo
+            set -l label $repo
+            test $n -gt 1; and set label "$repo ($n worktrees)"
+            printf "%s\t%s\n" (__du_work_human $kb) $label
+        end
+
+    echo
+    __du_work_heading Total
+    echo (__du_work_human $total)
 end
