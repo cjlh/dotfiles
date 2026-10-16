@@ -21,6 +21,10 @@ To install apps and link configs:
 brew install uv
 stow scripts
 
+# Agent skills
+mkdir -p ~/.claude/skills  # avoid symlinking entire skills directory
+stow skills
+
 # Neovim (https://github.com/neovim/neovim)
 brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
 stow neovim
