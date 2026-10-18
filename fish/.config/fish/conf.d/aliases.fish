@@ -3,7 +3,9 @@
 # See https://allanmacgregor.com/posts/using-abbreviations-instead-of-aliases
 
 abbr ll "ls -al"
+
 abbr tt "tree -a -L 2"  # Get overview of current directory
+abbr ttt "tree -a"      # Full tree
 
 alias cdr "cd (git rev-parse --show-toplevel)"
 
