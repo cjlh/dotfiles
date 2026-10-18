@@ -8,6 +8,9 @@ fish_add_path "/usr/local/bin"
 fish_add_path "$HOME/.local/bin"
 fish_add_path "/opt/homebrew/bin"
 
+# Global bun (`bun add -g ...`)
+fish_add_path "$HOME/.bun/bin"
+
 # subl utility
 fish_add_path "/Applications/Sublime Text.app/Contents/SharedSupport/bin"
 
