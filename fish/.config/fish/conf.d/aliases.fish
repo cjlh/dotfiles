@@ -9,6 +9,8 @@ abbr ttt "tree -a"      # Full tree
 
 alias cdr "cd (git rev-parse --show-toplevel)"
 
+abbr rgf "rg --hidden -F"
+
 abbr vi "/usr/bin/vim"
 abbr vim "nvim"
 
