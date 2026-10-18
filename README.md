@@ -30,7 +30,7 @@ mkdir -p ~/.claude/skills  # avoid symlinking entire skills directory
 stow skills
 
 # Neovim (https://github.com/neovim/neovim)
-brew install neovim ripgrep fd tree-sitter tree-sitter-cli basedpyright lua-language-server
+brew install neovim ripgrep fd tree-sitter tree-sitter-cli
 stow neovim
 
 # nvimpager (https://github.com/lucc/nvimpager)
