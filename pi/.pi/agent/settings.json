@@ -1,0 +1,9 @@
+{
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-6.1-sol",
+  "defaultThinkingLevel": "medium",
+  "theme": "dark",
+  "packages": [
+    "npm:@narumitw/pi-plan-mode"
+  ]
+}

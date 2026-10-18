@@ -17,8 +17,10 @@ stow -nv */
 To install apps and link configs:
 
 ```sh
+# Packages used by tools and commands
+brew install uv brew install oven-sh/bun/bun
+
 # Utility scripts - `~/.local/bin/` must be on `PATH`
-brew install uv
 stow scripts
 
 # asdf for managing Node runtimes (https://github.com/asdf-vm/asdf)
@@ -49,6 +51,9 @@ stow kitty
 # Fish shell (https://github.com/fish-shell/fish-shell)
 brew install fish
 stow fish
+
+# pi (https://github.com/earendil-works/pi)
+bun add -g --ignore-scripts @earendil-works/pi-coding-agent
 
 # Zed editor (https://github.com/zed-industries/zed)
 brew install --cask zed
