@@ -50,6 +50,7 @@ stow kitty
 
 # Fish shell (https://github.com/fish-shell/fish-shell)
 brew install fish
+mkdir -p ~/.config/fish/functions ~/.config/fish/conf.d
 stow fish
 
 # pi (https://github.com/earendil-works/pi)
