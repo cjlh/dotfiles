@@ -23,5 +23,3 @@ abbr gcm "git commit -m"
 abbr gca "git commit --amend"
 
 abbr jj "just --unstable"
-abbr oc "opencode"
-
