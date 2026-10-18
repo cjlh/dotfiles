@@ -21,6 +21,10 @@ To install apps and link configs:
 brew install uv
 stow scripts
 
+# asdf for managing Node runtimes (https://github.com/asdf-vm/asdf)
+brew install asdf
+stow asdf
+
 # Agent skills
 mkdir -p ~/.claude/skills  # avoid symlinking entire skills directory
 stow skills
