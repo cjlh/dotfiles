@@ -2,7 +2,7 @@
   "defaultProvider": "openai",
   "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "medium",
-  "theme": "dark",
+  "theme": "vague-custom",
   "packages": [
     "npm:@narumitw/pi-plan-mode"
   ]
