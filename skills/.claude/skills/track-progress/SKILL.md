@@ -1,8 +1,8 @@
 ---
 name: track-progress
-description: Track progress for the current task in a markdown file using a fixed status convention.
+description: Track progress for the current task in a markdown file using a fixed status convention. This skill should only be invoked if explicitly requested by the user.
 argument-hint: [directory or file path]
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 Track progress for the current task in a markdown file.
