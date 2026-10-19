@@ -3,6 +3,17 @@ name: track-progress
 description: Track progress for the current task in a markdown file using a fixed status convention. This skill should only be invoked if explicitly requested by the user.
 argument-hint: [directory or file path]
 disable-model-invocation: false
+hooks:
+  PostToolUse:
+    - matcher: "Write|Edit"
+      hooks:
+        - type: command
+          command: "$HOME/.claude/skills/track-progress/scripts/record.sh"
+  SessionStart:
+    - matcher: "compact"
+      hooks:
+        - type: command
+          command: "$HOME/.claude/skills/track-progress/scripts/restore.sh"
 ---
 
 Track progress for the current task in a markdown file.
@@ -25,7 +36,9 @@ Track progress for the current task in a markdown file.
 - If the file already exists, read it in full before doing anything else. Treat `[✗]`
   items as ruled out and don't retry them unless there's new evidence. Pick up from
   In-progress; if that's empty, move the next Todo item into it.
-- If it doesn't exist, create it with a one-line **Goal** at the top, then these sections
+- The first line of the file must be exactly `<!-- track-progress -->`. Hooks use it to
+  find the file again after compaction. Add it if an existing file is missing it.
+- If it doesn't exist, create it with the marker line, a one-line **Goal**, then these sections
   in order: `## In-progress`, `## Todo`, `## Done`, `## Out of scope`. Populate Todo with
   your initial plan.
 - If useful, add a short paragraph of context about the overall task below the Goal.
@@ -57,7 +70,8 @@ Track progress for the current task in a markdown file.
 ## Example
 
 ```markdown
-**Goal:** Stop intermittent auth timeouts in the API client
+<!-- track-progress -->
+**Goal:**  Stop intermittent auth timeouts in the API client
 
 ## In-progress
 - [◐] Swap the retry logic to exponential backoff
