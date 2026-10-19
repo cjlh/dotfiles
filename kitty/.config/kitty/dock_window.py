@@ -89,7 +89,7 @@ def handle_result(
 
     # Open the new window first so that the tab always has a normal window,
     # otherwise kitty would close its docks
-    spec = parse_launch_args(["--cwd=current"])
+    spec = parse_launch_args(["--cwd=oldest"])
     if (
         new_window := launch(
             boss, spec.opts, spec.args, target_tab=tab, force_target_tab=True
