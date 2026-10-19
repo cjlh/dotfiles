@@ -38,9 +38,12 @@ Track progress for the current task in a markdown file.
   In-progress; if that's empty, move the next Todo item into it.
 - The first line of the file must be exactly `<!-- track-progress -->`. Hooks use it to
   find the file again after compaction. Add it if an existing file is missing it.
-- If it doesn't exist, create it with the marker line, a one-line **Goal**, then these sections
-  in order: `## In-progress`, `## Todo`, `## Done`, `## Out of scope`. Populate Todo with
-  your initial plan.
+- If it doesn't exist, create it with the marker line, a one-line **Goal**, then these
+  sections in order: `## In-progress`, `## Todo`, `## Done`, `## Out of scope`, `## Key`.
+  Populate Todo with your initial plan.
+- `## Key` is always the last section, copied verbatim from the example below so the file
+  makes sense on its own. Add it if an existing file is missing it, and never put items
+  under it.
 - If useful, add a short paragraph of context about the overall task below the Goal.
 
 ## Status markers
@@ -71,7 +74,7 @@ Track progress for the current task in a markdown file.
 
 ```markdown
 <!-- track-progress -->
-**Goal:**  Stop intermittent auth timeouts in the API client
+**Goal:** Stop intermittent auth timeouts in the API client
 
 ## In-progress
 - [◐] Swap the retry logic to exponential backoff
@@ -85,4 +88,12 @@ Track progress for the current task in a markdown file.
 
 ## Out of scope
 - [↻] Refactor client into its own module — after the fix ships
+
+## Key
+- `[ ]` not yet started
+- `[◐]` in-progress
+- `[✓]` completed successfully
+- `[✗]` completed unsuccessfully
+- `[↻]` parked to revisit later
+- `[-]` dropped without plans to revisit
 ```
