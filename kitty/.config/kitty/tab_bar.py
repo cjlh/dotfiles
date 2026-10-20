@@ -1,5 +1,5 @@
-# Custom tab bar that displays Codex and Claude Code usage in the far
-# right corner.
+# Custom tab bar that displays available disk space, Codex and Claude Code
+# usage in the far right corner. Disk space is sampled every redraw interval.
 # Each cost is read from a cache file which is refreshed in the background
 # by running ccusage at most once every REFRESH_INTERVAL seconds.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
@@ -7,10 +7,12 @@
 import json
 import os
 import subprocess
+import sys
+import threading
 import time
 
 from kitty.boss import get_boss
-from kitty.fast_data_types import Screen, add_timer
+from kitty.fast_data_types import Screen, add_timer, wcswidth
 from kitty.tab_bar import (
     DrawData,
     ExtraData,
@@ -24,6 +26,58 @@ REDRAW_INTERVAL = 30  # seconds between tab bar redraws
 STATUS_FG = as_rgb(0x656565)
 
 _timer_id = None
+
+
+class DiskSpace:
+    """Cached available capacity of the startup filesystem."""
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.worker = None
+        self.next_refresh = 0.0
+
+    def _refresh(self) -> None:
+        try:
+            if sys.platform == "darwin":
+                helper = os.path.join(os.path.dirname(__file__), "disk_available.js")
+                result = subprocess.run(
+                    ["/usr/bin/osascript", "-l", "JavaScript", helper],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    check=True,
+                    timeout=5,
+                )
+                available = int(result.stdout.strip())
+            elif sys.platform.startswith("linux"):
+                stats = os.statvfs("/")
+                available = stats.f_bavail * stats.f_frsize
+            else:
+                self.text = ""
+                return
+
+            self.text = f"⛁ {available // 1_000_000_000}G" if available >= 0 else ""
+        except (OSError, ValueError, subprocess.SubprocessError):
+            self.text = ""
+
+    def maybe_refresh(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            return
+        if time.monotonic() < self.next_refresh:
+            return
+
+        self.next_refresh = time.monotonic() + REDRAW_INTERVAL
+        self.worker = threading.Thread(target=self._refresh, daemon=True)
+        self.worker.start()
+        # Check completion on kitty's UI thread so the first result appears
+        # promptly, without touching the UI from the background worker.
+        add_timer(self._poll_refresh, 0.1, False)
+
+    def _poll_refresh(self, timer_id=None) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            add_timer(self._poll_refresh, 0.1, False)
+        else:
+            _mark_tab_bar_dirty()
 
 
 class UsageSource:
@@ -90,16 +144,21 @@ SOURCES = (
     UsageSource("codex", "⌬", "costUSD"),
     UsageSource("claude", "✻", "totalCost"),
 )
+DISK_SPACE = DiskSpace()
 
 
 def _maybe_refresh() -> None:
+    DISK_SPACE.maybe_refresh()
     for source in SOURCES:
         source.maybe_refresh()
 
 
 def _tick(timer_id=None) -> None:
     _maybe_refresh()
+    _mark_tab_bar_dirty()
 
+
+def _mark_tab_bar_dirty() -> None:
     tm = get_boss().active_tab_manager
 
     if tm is not None:
@@ -107,12 +166,13 @@ def _tick(timer_id=None) -> None:
 
 
 def _draw_right_status(screen: Screen) -> None:
-    text = " ".join(t for t in (s.usage_text() for s in SOURCES) if t)
+    parts = [DISK_SPACE.text, *(s.usage_text() for s in SOURCES)]
+    text = " ".join(t for t in parts if t)
 
     if not text:
         return
 
-    padding = screen.columns - screen.cursor.x - len(text)
+    padding = screen.columns - screen.cursor.x - wcswidth(text)
 
     if padding < 1:
         return
