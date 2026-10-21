@@ -4,4 +4,6 @@ vim.opt.runtimepath:append(vim.fs.joinpath(nvim_data, "site/pack/core/opt/vague.
 dofile(vim.fn.expand("~/.config/nvim/lua/colours.lua"))
 
 dofile(vim.fn.expand("~/.config/nvim/lua/options.lua"))
+vim.opt.foldmethod = "manual"
+
 dofile(vim.fn.expand("~/.config/nvim/lua/remaps.lua"))
