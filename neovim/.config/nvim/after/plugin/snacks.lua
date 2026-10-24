@@ -15,6 +15,9 @@ local exclude_dirs = {
 require('snacks').setup {
     image = {},
     scroll = {},
+    words = {
+        debounce = 50,
+    },
     terminal = {
         win = {
             border = 'rounded',
@@ -172,3 +175,11 @@ end, { desc = 'Open LSP incoming calls (Snacks)' })
 vim.keymap.set('n', '<leader>co', function()
     Snacks.picker.lsp_outgoing_calls()
 end, { desc = 'Open outgoing LSP calls (Snacks)' })
+
+vim.keymap.set('n', ']]', function()
+    Snacks.words.jump(vim.v.count1)
+end, { desc = 'Jump to next LSP reference (Snacks)' })
+
+vim.keymap.set('n', '[[', function()
+    Snacks.words.jump(-vim.v.count1)
+end, { desc = 'Jump to previous LSP reference (Snacks)' })
