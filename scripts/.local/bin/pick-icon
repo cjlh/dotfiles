@@ -35,11 +35,11 @@ import zlib
 # Model-based selection uses the name and description of each icon. Note adding or
 # modifying the icon list causes all cached icons to be re-picked.
 ICONS = {
-    "umbrella": ("☂", "protection, cover, fallback, rain"),
+    "umbrella": ("☂", "cover, fallback, workarounds"),
     "ascending-node": ("☊", "orbits, astronomy, connections, networking"),
-    "skull": ("☠", "danger, killing processes, debugging crashes, destructive work"),
-    "cross": ("☩", "religion, crossroads, medical, merging"),
-    "moon": ("⏾", "sleep, night, background or idle work, scheduled jobs"),
+    "skull": ("☠", "danger, killing processes, destructive work"),
+    "cross": ("☩", "religion, crossroads, architecture"),
+    "moon": ("⏾", "sleep, night, background or idle work, darkness"),
     "chess-bishop": ("♝", "strategy, planning, diagonal thinking"),
     "chess-knight": ("♞", "tactics, games, unusual moves"),
     "spade": ("♠", "digging, gardening, cards"),
@@ -49,18 +49,65 @@ ICONS = {
     "music-notes": ("♬", "music, audio, sound"),
     "crossed-swords": ("⚔", "conflict, competition, fixing merge conflicts, battles"),
     "pick": ("⛏", "mining, digging into data, excavation, crypto"),
-    "shield": ("⛨", "security, auth, defence, permissions"),
+    "shield": (
+        "⛨",
+        "protection, security, auth, defence, permissions, upgrading dependencies",
+    ),
     "shrine": ("⛩", "Japan, travel, gateways, entry points"),
     "gear": ("⛭", "settings, config, tooling, infrastructure, builds"),
     "mountain": ("⛰", "big projects, goals, outdoors, hiking"),
-    "beach-umbrella": ("⛱", "holiday, leisure, side projects, downtime"),
-    "skier": ("⛷", "speed, sport, winter, going downhill"),
+    "beach-umbrella": ("⛱", "holiday, leisure, rest, downtime"),
+    "skier": ("⛷", "speed, sport, winter, going downhill, risky but exciting"),
     "flag": ("⚑", "milestones, releases, feature flags, markers"),
-    "pencil": ("✎", "writing, editing, notes, docs, drafts"),
-    "star": ("★", "important, favourites, highlights, ratings"),
+    "pencil": ("✎", "writing, editing, notes, docs, drafts, updating"),
+    "star": ("★", "important, saved, highlights, ratings"),
     "sparkle": ("✦", "AI, new things, magic, ideas"),
     "up-triangle": ("⏶", "deploys, uploads, growth, upgrades"),
-    "airplane": ("✈", "travel, shipping, flights, remote"),
+    "airplane": ("✈", "travel, shipping, flights, remote, distance"),
+    "sun": ("☀", "sunshine, daytime, good news, optimism"),
+    "cloud": ("☁", "cloud computing, hosting, servers, weather"),
+    "snowman": ("☃", "winter, Christmas, festive, fun"),
+    "comet": ("☄", "speed, performance, crashes, impact"),
+    "sun-target": ("☉", "targets, focus, aims, bullet points"),
+    "telephone": ("☏", "calls, meetings, contact, support"),
+    "radioactive": (
+        "☢",
+        "hazardous changes, nuclear, toxic code, contamination, testing",
+    ),
+    "menu": ("≡", "menus, lists, logs"),
+    "smiley": ("☻", "people, users, social, happiness"),
+    "chess-king": ("♔", "leadership, management, the most important thing, KPIs/OKRs"),
+    "recycling": ("♻", "reuse, sustainability, cleanup, recycling"),
+    "die": ("⚄", "randomness, chance, experiments, luck"),
+    "warning": ("⚠", "warnings, caution, risky changes, alerts, surprise"),
+    "draughts-man": ("⛀", "coins, tokens, board games"),
+    "database": ("⛁", "databases, storage, stacks"),
+    "rain": ("⛆", "rain, storms, gloom"),
+    "car-sliding": (
+        "⛐",
+        "driving, cars, out of control, accidents, breaking changes, debugging",
+    ),
+    "helmet": (
+        "⛑",
+        "fixing, hot-fixes, rescue, incidents, issues/tickets, first aid, medical, developer tools, linting and type-checking",
+    ),
+    "square-corners": ("⛶", "fullscreen, UI, screenshots, layouts, design"),
+    "scissors": ("✄", "cutting, trimming, refactoring, crafts"),
+    "envelope": ("✉", "email, messages, mail, newsletters, DMs, Slack"),
+    "snowflake": ("❆", "code freezes, cold, uniqueness"),
+    "arrowhead": ("➤", "next steps, pointers, sending"),
+    "feathered-arrow": ("➶", "aiming, archery, launching, trajectory"),
+    "three-of-hearts": ("🂳", "card games, gambling, poker, bluffing"),
+    "joker": ("🃟", "jokes, wildcards, chaos, humour"),
+    "right-arrow": ("→", "redirects, forwarding, mapping, transitions"),
+    "up-down-arrow": ("↕", "sorting, ordering, scrolling"),
+    "hook-arrow": ("↩", "reverting, undo, returns, replies"),
+    "clockwise-arrow": ("↷", "redo, rotation, turning"),
+    "circle-arrow": ("↻", "retries, refreshing, loops, reloading"),
+    "harpoons": ("⇋", "sync, migration, exchange, two-way, ping, peer-to-peer"),
+    "arrow-from-wall": ("⇰", "exports, piping, leaving, formatting"),
+    "arrow-to-corner": ("⇱", "home, top level, back to the start"),
+    "timer": ("⏱", "clock, scheduled jobs, cron jobs, measurement, timing"),
 }
 
 INSTRUCTIONS = """\
@@ -163,7 +210,7 @@ def xcode_warning() -> str | None:
 
     if match and int(match.group(1)) < 26:
         return XCODE_OUTDATED_WARNING.format(version=match.group(0).split()[1])
-    
+
     return None
 
 
@@ -182,7 +229,7 @@ def warn(message: str) -> None:
 
         with open(XCODE_WARNED_PATH, "w"):
             pass
-        
+
         subprocess.run(
             [
                 "osascript",
@@ -209,7 +256,7 @@ def pick_with_model(names: list[str]) -> None:
 
     if uv is None:
         return
-    
+
     # Show build errors when run from a terminal, otherwise there is no one to read them.
     subprocess.run(
         [uv, "run", "--quiet", "--with", SDK, "--script", __file__, *names],
@@ -249,7 +296,7 @@ async def model_icon_ids(fm, names: list[str]) -> dict[str, str]:
 
         try:
             response = await session.respond(f"Name: {name}", generating=Choice)
-        
+
             if response.icon in ICONS:
                 icon_ids[name] = response.icon
         except (
@@ -268,7 +315,7 @@ def read_cache() -> dict[str, str]:
     try:
         with open(CACHE_PATH) as f:
             data = json.load(f)
-        
+
         if data["version"] == CACHE_VERSION:
             return {str(k): str(v) for k, v in data["icons"].items()}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -285,13 +332,13 @@ def update_cache(icon_ids: dict[str, str]) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
 
         data = {"version": CACHE_VERSION, "icons": {**read_cache(), **icon_ids}}
-        
+
         fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=".icons-")
-        
+
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f)
-        
+
             os.replace(temp_path, CACHE_PATH)
         except OSError:
             os.unlink(temp_path)
@@ -322,7 +369,7 @@ if __name__ == "__main__":
 
     # kitty may run this without a UTF-8 locale
     sys.stdout.reconfigure(encoding="utf-8")
-    
+
     for name in args.names:
         icon_id = icon_ids.get(name)
         print(ICONS[icon_id][0] if icon_id in ICONS else hashed_icon(name))
