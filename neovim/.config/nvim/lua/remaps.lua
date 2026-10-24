@@ -37,6 +37,9 @@ end, { desc = 'Clear highlights' })
 vim.keymap.set('v', 'J', ":m '>+1<CR>gv=gv", { desc = 'Move line down' })
 vim.keymap.set('v', 'K', ":m '<-2<CR>gv=gv", { desc = 'Move line up' })
 
+-- Switch to alternate (previous) buffer (avoids conflicts with window manager)
+vim.keymap.set('n', '<leader><Tab>', '<C-^>', { desc = 'Switch to alternate buffer' })
+
 -- Tab control
 vim.keymap.set('n', '<leader>tt', '<cmd>tabnew<CR>', { desc = 'New tab' })
 vim.keymap.set('n', '<leader>tq', '<cmd>tabclose<CR>', { desc = 'Close tab' })
