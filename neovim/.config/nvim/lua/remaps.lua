@@ -37,6 +37,13 @@ end, { desc = 'Clear highlights' })
 vim.keymap.set('v', 'J', ":m '>+1<CR>gv=gv", { desc = 'Move line down' })
 vim.keymap.set('v', 'K', ":m '<-2<CR>gv=gv", { desc = 'Move line up' })
 
+-- Tab control
+vim.keymap.set('n', '<leader>tt', '<cmd>tabnew<CR>', { desc = 'New tab' })
+vim.keymap.set('n', '<leader>tq', '<cmd>tabclose<CR>', { desc = 'Close tab' })
+vim.keymap.set('n', '<leader>to', '<cmd>tabonly<CR>', { desc = 'Close other tabs' })
+vim.keymap.set('n', '<leader>t>', '<cmd>tabmove +1<CR>', { desc = 'Move tab right' })
+vim.keymap.set('n', '<leader>t<', '<cmd>tabmove -1<CR>', { desc = 'Move tab left' })
+
 -- Open LSP definitions in new tab
 vim.keymap.set('n', '<C-RightMouse>', function()
     vim.cmd 'tab split'
