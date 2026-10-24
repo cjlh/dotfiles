@@ -3,6 +3,10 @@
 # All providers read JSON caches in ~/.cache/kitty-tab-bar and refresh them
 # concurrently in the background. Agent usage is refreshed every
 # CCUSAGE_REFRESH_INTERVAL seconds.
+#
+# Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In
+# "apple-foundation-model" mode the icon is chosen by Apple's on-device model
+# using tab_icon.swift, which is compiled into the cache directory on first use.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
 import json
@@ -16,7 +20,7 @@ import zlib
 from typing import Literal
 
 from kitty.boss import get_boss
-from kitty.constants import clear_handled_signals
+from kitty.constants import clear_handled_signals, config_dir
 from kitty.fast_data_types import Screen, add_timer, remove_timer, wcswidth
 from kitty.tab_bar import (
     DrawData,
@@ -25,6 +29,7 @@ from kitty.tab_bar import (
     as_rgb,
     draw_tab_with_separator,
 )
+from kitty.utils import log_error
 
 CCUSAGE_REFRESH_INTERVAL = 300  # seconds between ccusage runs
 CCUSAGE_TIMEOUT = 120  # seconds before a ccusage run is killed
@@ -34,42 +39,52 @@ REDRAW_INTERVAL = 30  # seconds between tab bar redraws
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
+TAB_ICON_TIMEOUT = 30  # seconds before choosing a tab icon is abandoned
+TAB_ICON_COMPILE_TIMEOUT = 300  # seconds before compiling tab_icon.swift is abandoned
 
-TabIconMode = Literal["dynamic", "fixed"]
+# "dynamic" picks an icon from the hash of the tab's name, "apple-foundation-model"
+# has Apple's on-device model pick the icon whose meaning best matches the name,
+# using "dynamic" when the model is unavailable or refuses to pick one.
+TabIconMode = Literal["dynamic", "fixed", "apple-foundation-model"]
 
-RENAMED_TAB_ICON_MODE: TabIconMode = "dynamic"
+RENAMED_TAB_ICON_MODE: TabIconMode = "apple-foundation-model"
 
 # Alternatives: ✎, ★, ✦, ⚐
 RENAMED_TAB_FIXED_ICON = "⚑"
 
-RENAMED_TAB_DYNAMIC_ICONS = [
-    "☂",
-    "☊",
-    "☠",
-    "☩",
-    "⏾",
-    "♝",
-    "♞",
-    "♠",
-    "♣",
-    "♥",
-    "♦",
-    "♬",
-    "⚔",
-    "⛏",
-    "⛨",
-    "⛩",
-    "⛭",
-    "⛰",
-    "⛱",
-    "⛷",
-    "⚑",
-    "✎",
-    "★",
-    "✦",
-    "⏶",
-    "✈",
-]
+# Shown while the model is picking an icon
+RENAMED_TAB_LOADING_ICON = "◌"
+
+# Ids and meanings are what the model picks from, the icons themselves mean
+# little to it. Changing them re-picks the icons of every renamed tab.
+RENAMED_TAB_DYNAMIC_ICONS = {
+    "umbrella": ("☂", "protection, cover, fallback, rain"),
+    "ascending-node": ("☊", "orbits, astronomy, connections, networking"),
+    "skull": ("☠", "danger, killing processes, debugging crashes, destructive work"),
+    "cross": ("☩", "religion, crossroads, medical, merging"),
+    "moon": ("⏾", "sleep, night, background or idle work, scheduled jobs"),
+    "chess-bishop": ("♝", "strategy, planning, diagonal thinking"),
+    "chess-knight": ("♞", "tactics, games, unusual moves"),
+    "spade": ("♠", "digging, gardening, cards"),
+    "club": ("♣", "groups, clubs, organisations, cards"),
+    "heart": ("♥", "personal, health, favourites, love"),
+    "diamond": ("♦", "money, finance, value, gems"),
+    "music-notes": ("♬", "music, audio, sound"),
+    "crossed-swords": ("⚔", "conflict, competition, fixing merge conflicts, battles"),
+    "pick": ("⛏", "mining, digging into data, excavation, crypto"),
+    "shield": ("⛨", "security, auth, defence, permissions"),
+    "shrine": ("⛩", "Japan, travel, gateways, entry points"),
+    "gear": ("⛭", "settings, config, tooling, infrastructure, builds"),
+    "mountain": ("⛰", "big projects, goals, outdoors, hiking"),
+    "beach-umbrella": ("⛱", "holiday, leisure, side projects, downtime"),
+    "skier": ("⛷", "speed, sport, winter, going downhill"),
+    "flag": ("⚑", "milestones, releases, feature flags, markers"),
+    "pencil": ("✎", "writing, editing, notes, docs, drafts"),
+    "star": ("★", "important, favourites, highlights, ratings"),
+    "sparkle": ("✦", "AI, new things, magic, ideas"),
+    "up-triangle": ("⏶", "deploys, uploads, growth, upgrades"),
+    "airplane": ("✈", "travel, shipping, flights, remote"),
+}
 
 _timer_id = None
 
@@ -295,69 +310,281 @@ class AgentUsageProvider(StatusProvider):
         # kitty may be launched from the Dock without Homebrew in PATH.
         env = dict(os.environ)
         env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
-        with open(output_path, "w") as output:
-            process = subprocess.Popen(
-                [
-                    "bunx",
-                    "ccusage",
-                    self.name,
-                    "daily",
-                    "--last",
-                    "1",
-                    "--offline",
-                    "--json",
-                ],
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=clear_handled_signals,
-            )
-
-        finished = False
-
-        def finish(succeeded: bool) -> None:
-            nonlocal finished
-            if not finished:
-                finished = True
-                done(succeeded)
-
-        # kitty reaps every child process itself, so let it report the exit on
-        # its main thread instead of waiting on the process.
-        def on_exit(exit_status: int, err=None) -> None:
-            remove_timer(timeout_timer)
-            # Stop Popen from waiting on a process kitty has already reaped.
-            process.returncode = os.waitstatus_to_exitcode(exit_status)
-            finish(exit_status == 0)
-
-        # Also finishes the refresh if the exit is never reported, e.g. when
-        # the process exits before kitty starts monitoring it.
-        def on_timeout(timer_id=None) -> None:
-            try:
-                process.kill()
-            except OSError:
-                pass
-            finish(False)
-
-        timeout_timer = add_timer(on_timeout, CCUSAGE_TIMEOUT, False)
-        try:
-            get_boss().monitor_pid(process.pid, on_exit)
-        except RuntimeError:
-            # kitty's monitored pid table is full; nothing will report the
-            # exit, so give up on this run rather than wait for the timeout.
-            remove_timer(timeout_timer)
-            on_timeout()
+        _run_monitored(
+            [
+                "bunx",
+                "ccusage",
+                self.name,
+                "daily",
+                "--last",
+                "1",
+                "--offline",
+                "--json",
+            ],
+            output_path,
+            CCUSAGE_TIMEOUT,
+            lambda exit_code: done(exit_code == 0),
+            env,
+        )
 
     def format_data(self, data) -> str:
         cost = data["totals"][self.cost_key]
         return f"{self.icon} {cost:,.2f}" if cost > 0 else ""
 
 
+class FoundationModelIcons:
+    """Icons for renamed tabs picked by Apple's on-device model. Names are
+    looked up one at a time by the tab_icon.swift helper in the background,
+    and the picked icon ids cached by name."""
+
+    # Cached for names the model refuses to pick an icon for
+    REFUSED = ""
+
+    def __init__(self) -> None:
+        self.source_path = os.path.join(config_dir, "tab_icon.swift")
+        self.binary_path = os.path.join(CACHE_DIR, "tab-icon")
+        self.cache_path = os.path.join(CACHE_DIR, "tab-icons.json")
+        self.available = sys.platform == "darwin"
+        self.compiled = False
+        self.busy = False
+        self.version = None
+        self.icons = None  # name -> icon id, loaded on first use
+        self.queue = []  # names waiting for an icon, oldest first
+        self.current = None  # name being looked up
+        self.failed = set()  # names whose lookup failed in this kitty
+
+    def icon(self, name: str) -> str | None:
+        """The icon for name, the loading icon while one is being picked, or
+        None if the model can't pick one."""
+        icons = self._load()
+        if not self.available or name in self.failed:
+            return None
+        if name in icons:
+            entry = RENAMED_TAB_DYNAMIC_ICONS.get(icons[name])
+            return entry[0] if entry else None
+        if name not in self.queue and name != self.current:
+            self.queue.append(name)
+            # Start the lookup after drawing rather than in the middle of it.
+            add_timer(self._next, 0, False)
+        return RENAMED_TAB_LOADING_ICON
+
+    def _load(self) -> dict[str, str]:
+        if self.icons is None:
+            self.icons = {}
+            try:
+                with open(self.source_path, "rb") as f:
+                    source = f.read()
+            except OSError:
+                self.available = False
+                return self.icons
+            # Changing the icons or the helper's prompt invalidates the cache.
+            icons_json = json.dumps(RENAMED_TAB_DYNAMIC_ICONS).encode()
+            self.version = zlib.crc32(source + icons_json)
+            self.icons = self._read_cache()
+        return self.icons
+
+    def _read_cache(self) -> dict[str, str]:
+        try:
+            with open(self.cache_path) as f:
+                data = json.load(f)
+            if data["version"] == self.version:
+                return {str(k): str(v) for k, v in data["icons"].items()}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+        return {}
+
+    def _store(self, name: str, icon_id: str) -> None:
+        # Merge with icons picked by other kitty instances since loading.
+        self.icons = {**self._read_cache(), **self.icons, name: icon_id}
+        temp_path = None
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=".tab-icons-")
+            with os.fdopen(fd, "w") as f:
+                json.dump({"version": self.version, "icons": self.icons}, f)
+            os.replace(temp_path, self.cache_path)
+        except OSError:
+            _unlink(temp_path)
+
+    def _disable(self, reason: str) -> None:
+        log_error(f"tab_bar.py: {reason}, using dynamic tab icons instead")
+        self.available = False
+        self.queue.clear()
+        _mark_tab_bar_dirty()
+
+    def _next(self, timer_id=None) -> None:
+        if self.busy or not self.available:
+            return
+        if not self.compiled:
+            self._compile()
+            return
+
+        # Skip names that were renamed again before their turn.
+        names = {tab.name for tab in get_boss().all_tabs}
+        while self.queue:
+            name = self.queue.pop(0)
+            if name in names and name not in self.icons and name not in self.failed:
+                self._lookup(name)
+                return
+
+    def _compile(self) -> None:
+        try:
+            if os.path.getmtime(self.binary_path) >= os.path.getmtime(self.source_path):
+                self.compiled = True
+                self._next()
+                return
+        except OSError:
+            pass
+
+        temp_path = None
+
+        def done(exit_code: int | None) -> None:
+            self.busy = False
+            if exit_code == 0:
+                try:
+                    os.replace(temp_path, self.binary_path)
+                except OSError:
+                    pass
+                else:
+                    self.compiled = True
+                    self._next()
+                    return
+            _unlink(temp_path)
+            self._disable("Unable to compile tab_icon.swift")
+
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=".tab-icon-")
+            os.close(fd)
+            self.busy = True
+            # Checking xcode-select first stops xcrun from offering to install
+            # the Command Line Tools when they are missing.
+            _run_monitored(
+                [
+                    "/bin/sh",
+                    "-c",
+                    'xcode-select -p >/dev/null 2>&1 && exec xcrun swiftc -O "$1" -o "$2"',
+                    "sh",
+                    self.source_path,
+                    temp_path,
+                ],
+                os.devnull,
+                TAB_ICON_COMPILE_TIMEOUT,
+                done,
+            )
+        except (OSError, subprocess.SubprocessError):
+            self.busy = False
+            _unlink(temp_path)
+            self._disable("Unable to compile tab_icon.swift")
+
+    def _lookup(self, name: str) -> None:
+        request = json.dumps(
+            {
+                "name": name,
+                "icons": [
+                    {"id": icon_id, "meaning": meaning}
+                    for icon_id, (_, meaning) in RENAMED_TAB_DYNAMIC_ICONS.items()
+                ],
+            }
+        )
+        temp_path = None
+
+        def done(exit_code: int | None) -> None:
+            self.busy = False
+            self.current = None
+            try:
+                if exit_code == 0:
+                    with open(temp_path) as f:
+                        icon_id = f.read().strip()
+                    if icon_id in RENAMED_TAB_DYNAMIC_ICONS:
+                        self._store(name, icon_id)
+                    else:
+                        self.failed.add(name)
+                elif exit_code == 2:
+                    self._store(name, self.REFUSED)
+                elif exit_code == 3:
+                    self._disable("Apple's on-device model is unavailable")
+                else:
+                    self.failed.add(name)
+            except OSError:
+                self.failed.add(name)
+            finally:
+                _unlink(temp_path)
+            _mark_tab_bar_dirty()
+            self._next()
+
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=".tab-icon-")
+            os.close(fd)
+            self.busy = True
+            self.current = name
+            _run_monitored(
+                [self.binary_path, request], temp_path, TAB_ICON_TIMEOUT, done
+            )
+        except (OSError, subprocess.SubprocessError):
+            self.busy = False
+            self.current = None
+            _unlink(temp_path)
+            self.failed.add(name)
+            _mark_tab_bar_dirty()
+            add_timer(self._next, 0, False)
+
+
+_foundation_model_icons = FoundationModelIcons()
+
 PROVIDERS = (
     DiskProvider(),
     AgentUsageProvider("codex", "⌬", "costUSD"),
     AgentUsageProvider("claude", "✻", "totalCost"),
 )
+
+
+def _run_monitored(args, output_path: str, timeout: int, done, env=None) -> None:
+    """Run args in the background with stdout written to output_path, then
+    call done(exit_code) on kitty's main thread, with None if it took longer
+    than timeout seconds."""
+    with open(output_path, "w") as output:
+        process = subprocess.Popen(
+            args,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=clear_handled_signals,
+        )
+
+    finished = False
+
+    def finish(exit_code: int | None) -> None:
+        nonlocal finished
+        if not finished:
+            finished = True
+            done(exit_code)
+
+    # kitty reaps every child process itself, so let it report the exit on
+    # its main thread instead of waiting on the process.
+    def on_exit(exit_status: int, err=None) -> None:
+        remove_timer(timeout_timer)
+        # Stop Popen from waiting on a process kitty has already reaped.
+        process.returncode = os.waitstatus_to_exitcode(exit_status)
+        finish(process.returncode)
+
+    # Also finishes if the exit is never reported, e.g. when the process
+    # exits before kitty starts monitoring it.
+    def on_timeout(timer_id=None) -> None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        finish(None)
+
+    timeout_timer = add_timer(on_timeout, timeout, False)
+    try:
+        get_boss().monitor_pid(process.pid, on_exit)
+    except RuntimeError:
+        # kitty's monitored pid table is full; nothing will report the
+        # exit, so give up on this run rather than wait for the timeout.
+        remove_timer(timeout_timer)
+        on_timeout()
 
 
 def _unlink(path) -> None:
@@ -412,9 +639,14 @@ def _renamed_tab_icon(name: str) -> str:
     if RENAMED_TAB_ICON_MODE == "fixed":
         return RENAMED_TAB_FIXED_ICON
 
+    if RENAMED_TAB_ICON_MODE == "apple-foundation-model":
+        icon = _foundation_model_icons.icon(name)
+        if icon is not None:
+            return icon
+
     # zlib.crc32 gives a consistent int value that we can index with
-    index = zlib.crc32(name.encode()) % len(RENAMED_TAB_DYNAMIC_ICONS)
-    return RENAMED_TAB_DYNAMIC_ICONS[index]
+    icons = list(RENAMED_TAB_DYNAMIC_ICONS.values())
+    return icons[zlib.crc32(name.encode()) % len(icons)][0]
 
 
 def _tab_title(tab: TabBarData) -> str:
