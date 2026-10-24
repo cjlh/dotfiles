@@ -95,6 +95,12 @@ vim.lsp.enable 'ruff'
 vim.lsp.enable 'basedpyright'
 vim.lsp.enable 'lua_ls'
 
+-- Provided by Xcode/Swift toolchain rather than Mason, so only enable where installed
+if vim.fn.executable 'sourcekit-lsp' == 1 then
+    vim.lsp.config('sourcekit', { filetypes = { 'swift', 'objc', 'objcpp' } })
+    vim.lsp.enable 'sourcekit'
+end
+
 vim.diagnostic.config {
     virtual_text = true,
     virtual_lines = false,
