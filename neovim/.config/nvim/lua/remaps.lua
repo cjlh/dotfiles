@@ -60,3 +60,12 @@ vim.keymap.set('i', '<C-c>', '<Esc>')
 vim.keymap.set('n', '<leader>s', ':%s/', { desc = 'Begin grep in file' })
 
 vim.keymap.set('n', '<leader>v', 'vin', { remap = true, desc = 'Select word/symbol under cursor' })
+
+-- Expand %% to the current buffer's directory on the command line, e.g. `:e %%sibling.lua`
+vim.keymap.set('c', '%%', function()
+    if vim.fn.getcmdtype() ~= ':' then
+        return '%%'
+    end
+    local dir = vim.fn.expand '%:h'
+    return vim.fn.fnameescape(dir == '' and '.' or dir) .. '/'
+end, { expr = true, desc = "Insert current buffer's directory" })
