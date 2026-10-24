@@ -79,6 +79,10 @@ vim.keymap.set('n', '<leader><leader>', function()
     Snacks.picker.files()
 end, { desc = 'Open file picker (Snacks)' })
 
+vim.keymap.set('n', '<leader>f', function()
+    Snacks.picker.files { cwd = vim.fn.expand '%:p:h' }
+end, { desc = "Open file picker in current buffer's directory (Snacks)" })
+
 vim.keymap.set('n', '<C-space>', function()
     Snacks.picker.grep()
 end, { desc = 'Open file search (Snacks)' })
