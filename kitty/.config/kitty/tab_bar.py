@@ -12,6 +12,8 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
+from typing import Literal
 
 from kitty.boss import get_boss
 from kitty.constants import clear_handled_signals
@@ -31,6 +33,43 @@ DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
+MAX_SHORT_TITLE_LENGTH = 24
+
+TabIconMode = Literal["dynamic", "fixed"]
+
+RENAMED_TAB_ICON_MODE: TabIconMode = "dynamic"
+
+# Alternatives: ✎, ★, ✦, ⚐
+RENAMED_TAB_FIXED_ICON = "⚑"
+
+RENAMED_TAB_DYNAMIC_ICONS = [
+    "☂",
+    "☊",
+    "☠",
+    "☩",
+    "⏾",
+    "♝",
+    "♞",
+    "♠",
+    "♣",
+    "♥",
+    "♦",
+    "♬",
+    "⚔",
+    "⛏",
+    "⛨",
+    "⛩",
+    "⛭",
+    "⛰",
+    "⛱",
+    "⛷",
+    "⚑",
+    "✎",
+    "★",
+    "✦",
+    "⏶",
+    "✈",
+]
 
 _timer_id = None
 
@@ -46,7 +85,9 @@ def _foundation_disk_capacity_query():
     import ctypes
 
     objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-    foundation = ctypes.CDLL("/System/Library/Frameworks/Foundation.framework/Foundation")
+    foundation = ctypes.CDLL(
+        "/System/Library/Frameworks/Foundation.framework/Foundation"
+    )
     objc.objc_getClass.argtypes = [ctypes.c_char_p]
     objc.objc_getClass.restype = ctypes.c_void_p
     objc.sel_registerName.argtypes = [ctypes.c_char_p]
@@ -64,8 +105,12 @@ def _foundation_disk_capacity_query():
 
     ns_string = objc.objc_getClass(b"NSString")
     ns_url = objc.objc_getClass(b"NSURL")
-    string_with_utf8 = objc_method(b"stringWithUTF8String:", ctypes.c_void_p, ctypes.c_char_p)
-    file_url_with_path = objc_method(b"fileURLWithPath:", ctypes.c_void_p, ctypes.c_void_p)
+    string_with_utf8 = objc_method(
+        b"stringWithUTF8String:", ctypes.c_void_p, ctypes.c_char_p
+    )
+    file_url_with_path = objc_method(
+        b"fileURLWithPath:", ctypes.c_void_p, ctypes.c_void_p
+    )
     get_resource_value = objc_method(
         b"getResourceValue:forKey:error:",
         ctypes.c_bool,
@@ -83,7 +128,9 @@ def _foundation_disk_capacity_query():
     def available_disk_capacity() -> int:
         pool = objc.objc_autoreleasePoolPush()
         try:
-            url = file_url_with_path(ns_url, string_with_utf8(ns_string, b"/System/Volumes/Data"))
+            url = file_url_with_path(
+                ns_url, string_with_utf8(ns_string, b"/System/Volumes/Data")
+            )
             capacity = ctypes.c_void_p()
             if not url or not get_resource_value(
                 url, ctypes.byref(capacity), important_capacity_key, None
@@ -168,7 +215,9 @@ class StatusProvider:
             fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=f".{self.name}-")
             os.close(fd)
             self.refreshing = True
-            self.start_fetch(temp_path, lambda succeeded: self._finish_refresh(temp_path, succeeded))
+            self.start_fetch(
+                temp_path, lambda succeeded: self._finish_refresh(temp_path, succeeded)
+            )
         except (OSError, subprocess.SubprocessError):
             self.refreshing = False
             _unlink(temp_path)
@@ -178,7 +227,9 @@ class StatusProvider:
         try:
             if succeeded:
                 with open(temp_path) as f:
-                    self.format_data(json.load(f))  # Validate before replacing a good cache.
+                    self.format_data(
+                        json.load(f)
+                    )  # Validate before replacing a good cache.
                 os.replace(temp_path, self.cache_path)
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -246,7 +297,16 @@ class AgentUsageProvider(StatusProvider):
         env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
         with open(output_path, "w") as output:
             process = subprocess.Popen(
-                ["bunx", "ccusage", self.name, "daily", "--last", "1", "--offline", "--json"],
+                [
+                    "bunx",
+                    "ccusage",
+                    self.name,
+                    "daily",
+                    "--last",
+                    "1",
+                    "--offline",
+                    "--json",
+                ],
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=output,
@@ -339,6 +399,32 @@ def _draw_right_status(screen: Screen) -> None:
     screen.draw(" " * padding + text)
 
 
+def _short_title(title: str) -> str:
+    """The last path component of the first word of a window title."""
+    words = title.split()
+    short = (words[0].rsplit("/", 1)[-1] if words else "") or "/"
+    if len(short) > MAX_SHORT_TITLE_LENGTH:
+        short = short[:MAX_SHORT_TITLE_LENGTH] + "…"
+    return short
+
+
+def _renamed_tab_icon(name: str) -> str:
+    if RENAMED_TAB_ICON_MODE == "fixed":
+        return RENAMED_TAB_FIXED_ICON
+
+    # zlib.crc32 gives a consistent int value that we can index with
+    index = zlib.crc32(name.encode()) % len(RENAMED_TAB_DYNAMIC_ICONS)
+    return RENAMED_TAB_DYNAMIC_ICONS[index]
+
+
+def _tab_title(tab: TabBarData) -> str:
+    # Tabs renamed with set_tab_title keep their full name, marked with an icon.
+    t = get_boss().tab_for_id(tab.tab_id)
+    if t is not None and t.name:
+        return f"{_renamed_tab_icon(t.name)} {tab.title}"
+    return _short_title(tab.title)
+
+
 def draw_tab(
     draw_data: DrawData,
     screen: Screen,
@@ -355,6 +441,7 @@ def draw_tab(
         _timer_id = add_timer(_tick, REDRAW_INTERVAL, True)
         _maybe_refresh()
 
+    tab = tab._replace(title=_tab_title(tab))
     end = draw_tab_with_separator(
         draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
     )
