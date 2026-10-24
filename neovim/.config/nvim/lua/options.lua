@@ -63,3 +63,18 @@ vim.opt.shortmess:append 'I'
 -- Disable messages like "Keyword completion (^N^P)"
 -- https://github.com/folke/noice.nvim/wiki/A-Guide-to-Messages#handling-hit-enter-messages
 vim.opt.shortmess:append 'c'
+
+-- Detect `uv run --script` shebangs as Python
+vim.filetype.add {
+    pattern = {
+        ['.*'] = {
+            function(_, bufnr)
+                local first_line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+                if first_line:match '^#!.*%f[%w]uv run' then
+                    return 'python'
+                end
+            end,
+            { priority = -math.huge },
+        },
+    },
+}
