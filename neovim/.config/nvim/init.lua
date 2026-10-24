@@ -9,6 +9,9 @@ vim.g.loaded_node_provider = 0
 vim.g.loaded_netrw = 1
 vim.g.loaded_netrwPlugin = 1
 
+-- Stop the Python ftplugin overriding the Snacks.words `[[`/`]]` mappings
+vim.g.no_python_maps = 1
+
 -- When opening directory from CLI arg, do not list contents
 local function cd_into_directory_argument()
     if vim.fn.argc(-1) ~= 1 then
