@@ -7,10 +7,13 @@
 # Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
 # mode the icon is picked by the pick-icon script from this repo's scripts
 # package, which is run in the background for names without an icon yet.
+# Names starting with a status tag, such as "[done] some task", show the
+# status's icon in place of the tag instead, see STATUS_TAG_ICONS.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +67,10 @@ RENAMED_TAB_FIXED_ICON = "⚑"
 
 # Shown while pick-icon is picking an icon
 RENAMED_TAB_LOADING_ICON = "◌"
+
+# Tags that replace a renamed tab's icon, matched case-insensitively
+STATUS_TAG_ICONS = {"todo": "☐", "done": "☑", "failed": "☒"}
+STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 
 
 def _statvfs_capacity(path: str) -> int:
@@ -504,22 +511,31 @@ def _short_title(title: str) -> str:
     """The last path component of the first word of a window title."""
     words = title.split()
     short = (words[0].rsplit("/", 1)[-1] if words else "") or "/"
+
     if len(short) > MAX_SHORT_TITLE_LENGTH:
         short = short[:MAX_SHORT_TITLE_LENGTH] + "…"
+
     return short
 
 
 def _renamed_tab_icon(name: str) -> str:
     if RENAMED_TAB_ICON_MODE == "fixed":
         return RENAMED_TAB_FIXED_ICON
+
     return _picked_icons().icon(name)
 
 
 def _tab_title(tab: TabBarData) -> str:
     # Tabs renamed with set_tab_title keep their full name, marked with an icon.
     t = get_boss().tab_for_id(tab.tab_id)
+
     if t is not None and t.name:
+        match = STATUS_TAG.match(t.name)
+
+        if match and (icon := STATUS_TAG_ICONS.get(match.group(1).lower())):
+            return f"{icon} {t.name[match.end() :]}".rstrip()
         return f"{_renamed_tab_icon(t.name)} {tab.title}"
+
     return _short_title(tab.title)
 
 
@@ -536,6 +552,7 @@ def draw_tab(
     _shared("timer", _start_timer)
 
     tab = tab._replace(title=_tab_title(tab))
+
     end = draw_tab_with_separator(
         draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
     )
