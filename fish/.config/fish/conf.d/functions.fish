@@ -23,6 +23,14 @@ function git-stash-store
     end
 end
 
+function gdu --description "Diff all untracked files in one git diff"
+    set -l files (git ls-files --others --exclude-standard)
+    test (count $files) -eq 0; and return
+    git add --intent-to-add -- $files
+    git diff -- $files
+    git reset --quiet -- $files
+end
+
 function docker-stop-all
     set -l containers (docker ps -q)
 
