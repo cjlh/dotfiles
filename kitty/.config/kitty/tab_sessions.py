@@ -36,6 +36,9 @@ SESSION_PATH = os.path.expanduser("~/.local/share/kitty/named-tabs.kitty-session
 SAVE_DELAY = 1.0
 # Foreground programs that are restarted in their window when restoring
 RESTORED_PROGRAMS = frozenset({"nvim", "vim", "less", "man", "htop", "btop", "top"})
+# Set on a tab manager by tab_bar.py while its tab bar is only being redrawn,
+# such as to animate a spinner, with nothing to save. Must match there.
+DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
 _pending = False
 _quitting = False
@@ -125,7 +128,8 @@ def _save() -> None:
 def on_tab_bar_dirty(boss: Boss, window: Window, data: dict[str, Any]) -> None:
     # Renames, new and closed tabs, and window title changes (which follow the
     # working directory and running program) all mark the tab bar dirty
-    _schedule()
+    if not getattr(data.get("tab_manager"), DRAW_ONLY_ATTR, False):
+        _schedule()
 
 
 def on_quit(boss: Boss, window: Window, data: dict[str, Any]) -> None:

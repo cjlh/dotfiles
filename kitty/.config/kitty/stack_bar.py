@@ -50,6 +50,10 @@ MAX_TITLE_LENGTH = 24
 
 SUPPORTS_DOCKS = hasattr(kitty.types, "DockSpec")
 
+# Set on a tab manager by tab_bar.py while its tab bar is only being redrawn,
+# such as to animate a spinner, with no bars to update. Must match there.
+DRAW_ONLY_ATTR = "tab_bar_draw_only"
+
 _pending = False
 _bar_ids: set[int] = set()
 _closing_ids: set[int] = set()
@@ -258,7 +262,8 @@ def on_load(boss: Boss, data: dict[str, Any]) -> None:
 
 def on_tab_bar_dirty(boss: Boss, window: Window, data: dict[str, Any]) -> None:
     # Layout changes, focus changes and windows being added or removed
-    _schedule()
+    if not getattr(data.get("tab_manager"), DRAW_ONLY_ATTR, False):
+        _schedule()
 
 
 def on_title_change(boss: Boss, window: Window, data: dict[str, Any]) -> None:

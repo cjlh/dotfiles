@@ -6,12 +6,13 @@
 # context file, which the name-tab script from this repo's scripts package
 # names with Apple's on-device model in the background.
 #
-# While it runs the tab shows a placeholder name, then the generated name, or
-# its previous name again when the model finds no clear purpose or fails. A
+# While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
+# place of its icon. It is then renamed with the generated name, unless the
+# model finds no clear purpose or fails, or the tab was renamed meanwhile. A
 # status tag such as "[todo]" at the start of the previous name is kept.
 #
-# Each context file and the model's response are kept in DATA_DIR, as fixtures
-# for evaluating the model with name-tab.
+# Each context file, the model's response and any errors from name-tab are kept
+# in DATA_DIR, as fixtures for evaluating the model with name-tab.
 #
 # Enable with: map ctrl+alt+shift+r kitten name_tab.py
 
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from kittens.tui.handler import result_handler
 from kitty.constants import clear_handled_signals
-from kitty.fast_data_types import add_timer, get_boss, remove_timer
+from kitty.fast_data_types import add_timer, get_boss, remove_timer, wakeup_main_loop
 from kitty.utils import log_error
 
 if TYPE_CHECKING:
@@ -36,8 +37,9 @@ if TYPE_CHECKING:
     from kitty.window import Window
 
 DATA_DIR = os.path.expanduser("~/.local/share/kitty/tab-names")
-# Shown with its own icon by tab_bar.py, see STATUS_TAG_ICONS
-PLACEHOLDER = "[naming] generating name…"
+# Set on tabs while their name is generated, to the name they had then, so
+# that tab_bar.py draws a spinner for them. Must match NAMING_ATTR there.
+NAMING_ATTR = "name_tab_previous_name"
 # Must match STATUS_TAG in tab_bar.py
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 # Last lines of each window's screen to include
@@ -186,16 +188,16 @@ def _generated_title(output_path: str) -> str | None:
     return title if title and title.lower() not in ("none", "null") else None
 
 
-def _run_name_tab(context_path: str, output_path: str, done) -> None:
+def _run_name_tab(context_path: str, output_path: str, log_path: str, done) -> None:
     """Run name-tab in the background, then call done(exit_code) on kitty's
     main thread, with None if it took longer than NAME_TAB_TIMEOUT seconds."""
-    with open(output_path, "w") as output:
+    with open(output_path, "w") as output, open(log_path, "w") as log:
         process = subprocess.Popen(
             [NAME_TAB, "--json", context_path],
             env={**os.environ, "PATH": HELPER_PATH},
             stdin=subprocess.DEVNULL,
             stdout=output,
-            stderr=subprocess.DEVNULL,
+            stderr=log,
             preexec_fn=clear_handled_signals,
         )
 
@@ -236,19 +238,20 @@ def handle_result(
     window = boss.window_id_map.get(target_window_id)
     tab = window.tabref() if window is not None else None
     # Also refuse tabs that are already being named
-    if NAME_TAB is None or tab is None or tab.name == PLACEHOLDER:
+    if NAME_TAB is None or tab is None or hasattr(tab, NAMING_ATTR):
         boss.ring_bell_if_allowed()
         return
 
-    previous_name = tab.name
-    match = STATUS_TAG.match(previous_name)
-    status_tag = match.group(0) if match else ""
     tab_id = tab.id
 
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         stem = os.path.join(DATA_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}-tab{tab_id}")
-        context_path, output_path = f"{stem}.txt", f"{stem}.json"
+        context_path, output_path, log_path = (
+            f"{stem}.txt",
+            f"{stem}.json",
+            f"{stem}.log",
+        )
         with open(context_path, "w", encoding="utf-8") as f:
             f.write(_tab_context(tab))
     except Exception as e:
@@ -256,20 +259,41 @@ def handle_result(
         boss.ring_bell_if_allowed()
         return
 
-    tab.set_title(PLACEHOLDER)
+    setattr(tab, NAMING_ATTR, tab.name)
+    tab.mark_tab_bar_dirty()
 
     def done(exit_code: int | None) -> None:
         tab = boss.tab_for_id(tab_id)
-        # Keep names given while the model was running
-        if tab is None or tab.name != PLACEHOLDER:
+        if tab is None:
             return
+        previous_name = getattr(tab, NAMING_ATTR)
+        delattr(tab, NAMING_ATTR)
         if exit_code != 0:
-            log_error(f"name_tab.py: name-tab failed with exit code {exit_code}")
+            log_error(
+                f"name_tab.py: name-tab failed with exit code {exit_code}, see {log_path}"
+            )
         title = _generated_title(output_path) if exit_code == 0 else None
-        tab.set_title(status_tag + title if title else previous_name)
+        # Keep names given while the model was running
+        if title and tab.name == previous_name:
+            match = STATUS_TAG.match(previous_name)
+            tab.set_title((match.group(0) if match else "") + title)
+        else:
+            # Stop drawing the spinner
+            tab.mark_tab_bar_dirty()
+        # This runs after kitty has drawn for the current loop iteration, and
+        # marking the tab bar dirty does not wake it to draw again
+        wakeup_main_loop()
+
+        # Only keep logs with something in them
+        try:
+            if os.path.getsize(log_path) == 0:
+                os.unlink(log_path)
+        except OSError:
+            pass
 
     try:
-        _run_name_tab(context_path, output_path, done)
+        _run_name_tab(context_path, output_path, log_path, done)
     except OSError as e:
         log_error(f"name_tab.py: failed to run name-tab: {e}")
-        tab.set_title(previous_name)
+        delattr(tab, NAMING_ATTR)
+        tab.mark_tab_bar_dirty()

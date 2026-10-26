@@ -9,6 +9,12 @@
 # package, which is run in the background for names without an icon yet.
 # Names starting with a status tag, such as "[done] some task", show the
 # status's icon in place of the tag instead, see STATUS_TAG_ICONS.
+#
+# While name_tab.py generates a tab's name, or pick-icon picks its icon, the icon
+# is replaced by a spinner, which a timer animates only while some tab is
+# waiting. Redraws that change nothing but what is drawn, such as the spinner's,
+# set DRAW_ONLY_ATTR so that watchers can skip their work, see
+# _mark_tab_bar_dirty.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
 import json
@@ -24,7 +30,13 @@ from typing import Literal
 
 from kitty.boss import get_boss
 from kitty.constants import clear_handled_signals
-from kitty.fast_data_types import Screen, add_timer, remove_timer, wcswidth
+from kitty.fast_data_types import (
+    Screen,
+    add_timer,
+    remove_timer,
+    wakeup_main_loop,
+    wcswidth,
+)
 from kitty.tab_bar import (
     DrawData,
     ExtraData,
@@ -65,18 +77,28 @@ RENAMED_TAB_ICON_MODE: TabIconMode = (
 # Alternatives: ✎, ★, ✦, ⚐
 RENAMED_TAB_FIXED_ICON = "⚑"
 
-# Shown while pick-icon is picking an icon
-RENAMED_TAB_LOADING_ICON = "◌"
-
 # Tags that replace a renamed tab's icon, matched case-insensitively
 STATUS_TAG_ICONS = {
     "todo": "☐",
     "done": "☑",
     "failed": "☒",
-    # Shown while name_tab.py generates a tab's name
-    "naming": "✧",
 }
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
+
+# Set on tabs by name_tab.py while it generates their name, must match there
+NAMING_ATTR = "name_tab_previous_name"
+
+# Shown in place of the icon of tabs being named or waiting for their icon,
+# one frame per interval
+SPINNER_FRAMES = "⠦⠖⠲⠴"
+SPINNER_INTERVAL = 0.12  # seconds
+
+# Set on a tab manager while its tab bar is marked dirty only to be redrawn,
+# with nothing about its tabs or windows changed. on_tab_bar_dirty is called
+# synchronously, so watchers that only care about changes return early while it
+# is set. Must match tab_sessions.py and stack_bar.py, and any new watcher with
+# an on_tab_bar_dirty handler should check it too.
+DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
 
 def _statvfs_capacity(path: str) -> int:
@@ -337,7 +359,10 @@ class PickedIcons:
             self.queue.append(name)
             # Start the run after drawing rather than in the middle of it.
             add_timer(self._run, 0, False)
-        return RENAMED_TAB_LOADING_ICON
+        return _spinner().frame()
+
+    def is_picking(self, name: str) -> bool:
+        return name in self.queue or name in self.picking
 
     def _run(self, timer_id=None) -> None:
         if self.picking:
@@ -405,8 +430,45 @@ def _shared(name: str, create):
     return getattr(boss, attr)
 
 
+class Spinner:
+    """Animates the spinner of tabs that are waiting, see _is_waiting. Frames
+    follow the clock rather than a count of redraws, so that redraws for other
+    reasons never make it skip ahead and every spinner turns in step."""
+
+    def __init__(self) -> None:
+        self.timer_id = None
+
+    def frame(self) -> str:
+        if self.timer_id is None:
+            self._schedule()
+        index = int(time.monotonic() / SPINNER_INTERVAL) % len(SPINNER_FRAMES)
+        return SPINNER_FRAMES[index]
+
+    def _schedule(self) -> None:
+        # Tick a quarter of the way into the next frame, so that a slightly
+        # early or late timer still draws each frame exactly once.
+        delay = SPINNER_INTERVAL * 1.25 - time.monotonic() % SPINNER_INTERVAL
+        self.timer_id = add_timer(self._tick, delay, False)
+
+    def _tick(self, timer_id=None) -> None:
+        self.timer_id = None
+        tab_managers = [
+            tm
+            for tm in get_boss().os_window_map.values()
+            if any(_is_waiting(t) for t in tm.tabs)
+        ]
+        # Stops once no tab is waiting, until frame() is called again.
+        if tab_managers:
+            self._schedule()
+            _mark_tab_bar_dirty(*tab_managers)
+
+
 def _picked_icons() -> PickedIcons:
     return _shared("picked_icons", PickedIcons)
+
+
+def _spinner() -> Spinner:
+    return _shared("spinner", Spinner)
 
 
 def _providers() -> tuple[StatusProvider, ...]:
@@ -492,9 +554,19 @@ def _tick(timer_id=None) -> None:
     _mark_tab_bar_dirty()
 
 
-def _mark_tab_bar_dirty() -> None:
-    for tm in get_boss().os_window_map.values():
-        tm.mark_tab_bar_dirty()
+def _mark_tab_bar_dirty(*tab_managers) -> None:
+    """Redraw the tab bars of tab_managers, or of every OS window when none are
+    given, telling watchers that nothing changed."""
+    for tm in tab_managers or get_boss().os_window_map.values():
+        setattr(tm, DRAW_ONLY_ATTR, True)
+        try:
+            tm.mark_tab_bar_dirty()
+        finally:
+            setattr(tm, DRAW_ONLY_ATTR, False)
+    # Marking dirty does not wake kitty's main loop, which only redraws when
+    # something else happens, such as input. Timers run outside it, so without
+    # this the redraw waits for the next keypress or program output.
+    wakeup_main_loop()
 
 
 def _draw_right_status(screen: Screen) -> None:
@@ -531,18 +603,33 @@ def _renamed_tab_icon(name: str) -> str:
     return _picked_icons().icon(name)
 
 
+def _is_naming(tab) -> bool:
+    return getattr(tab, NAMING_ATTR, None) is not None
+
+
+def _is_waiting(tab) -> bool:
+    """Whether tab shows a spinner, while being named or waiting for its icon."""
+    return _is_naming(tab) or (
+        bool(tab.name)
+        and RENAMED_TAB_ICON_MODE == "dynamic"
+        and _picked_icons().is_picking(tab.name)
+    )
+
+
 def _tab_title(tab: TabBarData) -> str:
     # Tabs renamed with set_tab_title keep their full name, marked with an icon.
     t = get_boss().tab_for_id(tab.tab_id)
+    spinner = _spinner().frame() if t is not None and _is_naming(t) else None
 
     if t is not None and t.name:
         match = STATUS_TAG.match(t.name)
 
         if match and (icon := STATUS_TAG_ICONS.get(match.group(1).lower())):
-            return f"{icon} {t.name[match.end() :]}".rstrip()
-        return f"{_renamed_tab_icon(t.name)} {tab.title}"
+            return f"{spinner or icon} {t.name[match.end() :]}".rstrip()
+        return f"{spinner or _renamed_tab_icon(t.name)} {tab.title}"
 
-    return _short_title(tab.title)
+    short = _short_title(tab.title)
+    return f"{spinner} {short}" if spinner else short
 
 
 def draw_tab(

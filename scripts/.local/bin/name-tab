@@ -111,12 +111,17 @@ def read_fixture(path: str) -> str:
 
 async def count_tokens(model, context: str) -> dict[str, int]:
     """Tokens each part of a request uses, which together with the response
-    must fit in the model's context window."""
-    return {
-        "instructions": await model.token_count(instructions=INSTRUCTIONS),
-        "schema": await model.token_count(TabName.generation_schema()),
-        "context": await model.token_count(context),
-    }
+    must fit in the model's context window. Empty if counting fails, so that
+    the failure is reported by the run that follows."""
+    try:
+        return {
+            "instructions": await model.token_count(instructions=INSTRUCTIONS),
+            "schema": await model.token_count(TabName.generation_schema()),
+            "context": await model.token_count(context),
+        }
+    except fm.FoundationModelsError as e:
+        print(f"Counting tokens failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return {}
 
 
 async def name_tab(context: str, options) -> tuple[dict, float]:
