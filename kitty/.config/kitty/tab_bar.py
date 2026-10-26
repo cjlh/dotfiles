@@ -69,7 +69,13 @@ RENAMED_TAB_FIXED_ICON = "⚑"
 RENAMED_TAB_LOADING_ICON = "◌"
 
 # Tags that replace a renamed tab's icon, matched case-insensitively
-STATUS_TAG_ICONS = {"todo": "☐", "done": "☑", "failed": "☒"}
+STATUS_TAG_ICONS = {
+    "todo": "☐",
+    "done": "☑",
+    "failed": "☒",
+    # Shown while name_tab.py generates a tab's name
+    "naming": "✧",
+}
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 
 

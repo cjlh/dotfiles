@@ -1,0 +1,204 @@
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["apple-fm-sdk==0.2.1"]
+# ///
+
+# Prototype harness for naming a kitty tab from what it contains, using Apple's
+# on-device model. Reads a context fixture (any text, such as kitty, git and
+# screen output gathered from a tab) and prints the model's structured
+# response, along with token usage and timings, to test whether the model
+# gives sensible titles, how reliably, and how quickly.
+#
+# Unlike pick-icon, the SDK is declared above rather than added to a second
+# run, as this is a test harness and not yet run by kitty. It needs macOS 26 or
+# later and Xcode 26 or later to build. See:
+# https://apple.github.io/python-apple-fm-sdk/
+
+import time
+
+START = time.perf_counter()
+
+import argparse
+import asyncio
+import json
+import sys
+from dataclasses import asdict
+from typing import Optional
+
+import apple_fm_sdk as fm
+
+IMPORTED = time.perf_counter()
+
+INSTRUCTIONS = """\
+You name terminal tabs. You are given a snapshot of one tab: its windows, \
+their working directories and running programs, recent screen text and the \
+state of any Git repositories they are in.
+
+Infer the underlying task the user is working on, not the tools they are \
+running. For example, name the feature being tested rather than "run tests", \
+and the problem being investigated rather than "view logs".
+
+Only use what the snapshot shows. Many tabs have no clear purpose, such as an \
+idle shell, a fresh login or a system monitor, and that is a normal answer. \
+Programs being open, a working directory or a login message alone are not a \
+purpose. A purpose needs evidence of specific work, such as changed files, \
+commits, commands run against a project, or errors being investigated.
+
+The title should be 1 to 4 lowercase words separated by spaces, naming the \
+task as the user would name it themselves."""
+
+
+@fm.generable("The task a terminal tab is being used for")
+class TabName:
+    # Fields are generated in order, so the title follows the evidence for it.
+    # The SDK only treats Optional[str], not str | None, as optional.
+    key_datapoints: list[str] = fm.guide(
+        "Facts about the work shown in the snapshot, such as the repository, "
+        "branch, files changed, commands run and errors shown",
+        min_items=1,
+        max_items=6,
+    )
+    has_clear_purpose: bool = fm.guide(
+        "Whether the facts show specific work towards a task"
+    )
+    description: Optional[str] = fm.guide(
+        "One or two sentences describing the task and current activity, "
+        "or none without a clear purpose"
+    )
+    title: Optional[str] = fm.guide(
+        "Short task-oriented title, or none without a clear purpose"
+    )
+
+
+class Arguments(argparse.Namespace):
+    fixtures: list[str] = []
+    repeat: int = 1
+    temperature: float | None = None
+    json: bool = False
+
+
+def parse_arguments() -> Arguments:
+    parser = argparse.ArgumentParser(
+        description="Name a tab from context fixtures, reporting tokens and timings."
+    )
+    _ = parser.add_argument(
+        "fixtures",
+        nargs="*",
+        metavar="FIXTURE",
+        help="files containing a tab's context, or - for stdin (the default)",
+    )
+    _ = parser.add_argument(
+        "-n", "--repeat", type=int, default=1, help="runs per fixture (default: 1)"
+    )
+    _ = parser.add_argument(
+        "-t", "--temperature", type=float, help="sampling temperature (0.0 to 1.0)"
+    )
+    _ = parser.add_argument(
+        "--json", action="store_true", help="print one JSON object per run"
+    )
+    return parser.parse_args(namespace=Arguments())
+
+
+def read_fixture(path: str) -> str:
+    if path == "-":
+        return sys.stdin.read()
+
+    with open(path) as f:
+        return f.read()
+
+
+async def count_tokens(model, context: str) -> dict[str, int]:
+    """Tokens each part of a request uses, which together with the response
+    must fit in the model's context window."""
+    return {
+        "instructions": await model.token_count(instructions=INSTRUCTIONS),
+        "schema": await model.token_count(TabName.generation_schema()),
+        "context": await model.token_count(context),
+    }
+
+
+async def name_tab(context: str, options) -> tuple[dict, float]:
+    """The model's response, or the error it raised, and seconds taken."""
+    # A fresh session per run, so earlier runs don't influence later ones
+    session = fm.LanguageModelSession(instructions=INSTRUCTIONS)
+    started = time.perf_counter()
+
+    try:
+        response = await session.respond(context, generating=TabName, options=options)
+        result = asdict(response)
+    except fm.FoundationModelsError as e:
+        result = {"error": type(e).__name__, "message": str(e)}
+
+    return result, time.perf_counter() - started
+
+
+def print_report(name: str, run: int, tokens: dict, budget: int, result: dict, seconds: float):
+    used = sum(tokens.values())
+    print(f"== {name} (run {run}) - {seconds:.2f}s")
+    print(
+        f"   tokens: {used}/{budget} before response "
+        f"({', '.join(f'{part} {count}' for part, count in tokens.items())})"
+    )
+
+    if "error" in result:
+        print(f"\033[31m   {result['error']}: {result['message']}\033[0m")
+        return
+
+    for datapoint in result["key_datapoints"] or []:
+        print(f"   - {datapoint}")
+
+    print(f"   purpose:     {result['has_clear_purpose']}")
+    print(f"   description: {result['description']}")
+    print(f"   title:       \033[1m{result['title']}\033[0m")
+
+
+async def main(args: Arguments) -> int:
+    model = fm.SystemLanguageModel()
+    available, reason = model.is_available()
+
+    if not available:
+        print(f"Model unavailable: {reason}", file=sys.stderr)
+        return 1
+
+    ready = time.perf_counter()
+    budget = model.context_size
+    options = fm.GenerationOptions(temperature=args.temperature)
+
+    if not args.json:
+        print(
+            f"startup: {IMPORTED - START:.2f}s importing SDK, "
+            f"{ready - IMPORTED:.2f}s checking model, context window {budget} tokens\n"
+        )
+
+    for path in args.fixtures or ["-"]:
+        context = read_fixture(path)
+        tokens = await count_tokens(model, context)
+
+        for run in range(1, args.repeat + 1):
+            result, seconds = await name_tab(context, options)
+
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "fixture": path,
+                            "run": run,
+                            "seconds": round(seconds, 3),
+                            "tokens": tokens,
+                            "context_size": budget,
+                            **result,
+                        }
+                    ),
+                    flush=True,
+                )
+            else:
+                print_report(path, run, tokens, budget, result, seconds)
+                print()
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main(parse_arguments())))
