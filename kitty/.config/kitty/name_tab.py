@@ -99,22 +99,28 @@ def _repository_context(root: str) -> list[str]:
     lines = [f"## Git repository {_home_relative(root)}", f"branch: {branch}"]
 
     status = (_git(root, "status", "--short") or "").splitlines()
-    lines.append("status:" if status else "status: clean")
+    lines.append("uncommitted changes:" if status else "uncommitted changes: none")
     lines += status[:GIT_STATUS_LINES]
     if len(status) > GIT_STATUS_LINES:
         lines.append(f"... and {len(status) - GIT_STATUS_LINES} more")
 
+    # Only history that is likely this tab's own work, as the repository's
+    # history would otherwise be taken as the tab's purpose: the branch's
+    # commits, or on the base branch those not yet pushed. Every commit of a
+    # repository without remotes is unpushed.
     base = _base_branch(root)
     merge_base = _git(root, "merge-base", "HEAD", base) if base else None
     if merge_base and branch not in (base, base.split("/")[-1]):
         if commits := _git(
             root, "log", "--oneline", f"-{GIT_LOG_COMMITS}", f"{merge_base}..HEAD"
         ):
-            lines += [f"commits since {base}:", commits]
+            lines += [f"commits on this branch, since {base}:", commits]
         if diff_stat := _git(root, "diff", "--stat", merge_base):
-            lines += [f"changes since {base}:", diff_stat]
-    elif commits := _git(root, "log", "--oneline", f"-{GIT_LOG_COMMITS}"):
-        lines += ["recent commits:", commits]
+            lines += [f"changes on this branch, since {base}:", diff_stat]
+    elif commits := _git(
+        root, "log", "--oneline", f"-{GIT_LOG_COMMITS}", "HEAD", "--not", "--remotes"
+    ):
+        lines += ["unpushed commits:", commits]
 
     return lines
 

@@ -44,10 +44,12 @@ running. For example, name the feature being tested rather than "run tests", \
 and the problem being investigated rather than "view logs".
 
 Only use what the snapshot shows. Many tabs have no clear purpose, such as an \
-idle shell, a fresh login or a system monitor, and that is a normal answer. \
-Programs being open, a working directory or a login message alone are not a \
-purpose. A purpose needs evidence of specific work, such as changed files, \
-commits, commands run against a project, or errors being investigated.
+idle shell, a fresh login, a system monitor or a shell just opened in a \
+project, and that is a normal answer. Programs being open, a working \
+directory, a repository, its name or being on its main branch, or a login \
+message alone are not a purpose. A purpose needs evidence of specific work in \
+this tab, such as uncommitted changes, commits on a branch or not yet pushed, \
+commands run against a project, or errors being investigated.
 
 The title should be 1 to 4 lowercase words separated by spaces, naming the \
 task as the user would name it themselves."""
