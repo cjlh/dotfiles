@@ -1,19 +1,21 @@
 # Custom kitten generated using Claude.
 #
-# Prototype that names the active tab after the task it is being used for. The
-# tab's windows (titles, working directories, running programs, last commands
-# and screen text) and the Git repositories they are in are written to a
-# context file, which the name-tab script from this repo's scripts package
-# names with Apple's on-device model in the background.
+# Prototype that names the active tab after the task it is being used for. A
+# snapshot of the tab's windows (titles, working directories, running programs,
+# last commands and screen text) is named in the background by the namer script
+# from this repo's scripts package, which adds the state of the Git
+# repositories they are in and asks Apple's on-device model for a name and an
+# icon for it.
 #
 # While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
-# place of its icon. It is then renamed with the generated name, unless the
-# model finds no clear purpose or fails, or the tab was renamed meanwhile. A
-# status tag such as "[todo]" at the start of the previous name is kept. Either
-# way its icon is then picked anew by tab_bar.py.
+# place of its icon. It is then renamed with the generated name and icon, unless
+# the model finds no clear purpose or fails, or the tab was renamed meanwhile. A
+# status tag such as "[todo]" at the start of the previous name is kept. If the
+# tab isn't renamed, or no icon was picked with its name, tab_bar.py picks its
+# icon anew.
 #
-# Each context file, the model's response and any errors from name-tab are kept
-# in DATA_DIR, as fixtures for evaluating the model with name-tab.
+# Each context given to the model, its response and any errors from namer are
+# kept in DATA_DIR, as fixtures for evaluating the model with 'namer eval'.
 #
 # Enable with: map ctrl+alt+shift+r kitten name_tab.py
 
@@ -24,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from typing import TYPE_CHECKING
 
@@ -34,26 +37,23 @@ from kitty.utils import log_error
 
 if TYPE_CHECKING:
     from kitty.boss import Boss
-    from kitty.tabs import Tab
     from kitty.window import Window
 
 DATA_DIR = os.path.expanduser("~/.local/share/kitty/tab-names")
 # Set on tabs while their name is generated, to the name they had then, so
 # that tab_bar.py draws a spinner for them. Must match NAMING_ATTR there.
 NAMING_ATTR = "name_tab_previous_name"
-# Set on tabs to have tab_bar.py pick their icon anew. Must match REPICK_ICON_ATTR there.
+# Set on tabs to have tab_bar.py pick their icon anew, or to the name they were
+# given and the icon picked with it. Must match REPICK_ICON_ATTR there.
 REPICK_ICON_ATTR = "tab_bar_repick_icon"
 # Must match STATUS_TAG in tab_bar.py
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 # Last lines of each window's screen to include
 SCREEN_LINES = 40
-GIT_TIMEOUT = 2  # seconds per git command
-GIT_STATUS_LINES = 20
-GIT_LOG_COMMITS = 8
-NAME_TAB_TIMEOUT = 120  # seconds, its first run on a machine builds its dependencies
+NAMER_TIMEOUT = 120  # seconds, its first run on a machine builds its dependencies
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH,
-# and name-tab is run by uv
+# and namer is run by uv
 HELPER_PATH = os.pathsep.join(
     [
         os.path.expanduser("~/.local/bin"),
@@ -61,77 +61,11 @@ HELPER_PATH = os.pathsep.join(
         os.environ.get("PATH", ""),
     ]
 )
-NAME_TAB = shutil.which("name-tab", path=HELPER_PATH)
+NAMER = shutil.which("namer", path=HELPER_PATH)
 
 
 def main(args: list[str]) -> None:
     pass
-
-
-def _git(cwd: str, *args: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, *args],
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            preexec_fn=clear_handled_signals,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return result.stdout.rstrip() if result.returncode == 0 else None
-
-
-def _base_branch(root: str) -> str | None:
-    """The branch the current one was likely made from."""
-    if (
-        default := _git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    ) is not None:
-        return default
-    for branch in ("main", "master"):
-        if _git(root, "rev-parse", "--verify", "--quiet", branch) is not None:
-            return branch
-    return None
-
-
-def _repository_context(root: str) -> list[str]:
-    branch = _git(root, "branch", "--show-current") or "(detached)"
-    lines = [f"## Git repository {_home_relative(root)}", f"branch: {branch}"]
-
-    status = (_git(root, "status", "--short") or "").splitlines()
-    lines.append("uncommitted changes:" if status else "uncommitted changes: none")
-    lines += status[:GIT_STATUS_LINES]
-    if len(status) > GIT_STATUS_LINES:
-        lines.append(f"... and {len(status) - GIT_STATUS_LINES} more")
-
-    # Only history that is likely this tab's own work, as the repository's
-    # history would otherwise be taken as the tab's purpose: the branch's
-    # commits, or on the base branch those not yet pushed. Every commit of a
-    # repository without remotes is unpushed.
-    base = _base_branch(root)
-    merge_base = _git(root, "merge-base", "HEAD", base) if base else None
-    if merge_base and branch not in (base, base.split("/")[-1]):
-        if commits := _git(
-            root, "log", "--oneline", f"-{GIT_LOG_COMMITS}", f"{merge_base}..HEAD"
-        ):
-            lines += [f"commits on this branch, since {base}:", commits]
-        if diff_stat := _git(root, "diff", "--stat", merge_base):
-            lines += [f"changes on this branch, since {base}:", diff_stat]
-    elif commits := _git(
-        root, "log", "--oneline", f"-{GIT_LOG_COMMITS}", "HEAD", "--not", "--remotes"
-    ):
-        lines += ["unpushed commits:", commits]
-
-    return lines
-
-
-def _home_relative(path: str) -> str:
-    home = os.path.expanduser("~")
-    return (
-        "~" + path[len(home) :]
-        if path == home or path.startswith(home + os.sep)
-        else path
-    )
 
 
 def _screen_text(window: Window) -> str:
@@ -139,75 +73,46 @@ def _screen_text(window: Window) -> str:
     return "\n".join(lines[-SCREEN_LINES:])
 
 
-def _tab_context(tab: Tab) -> str:
-    windows: list[Window] = list(tab)
-    lines = ["## Tab"]
-    roots: dict[str, None] = {}  # repository roots in window order
-
-    for i, window in enumerate(windows, 1):
-        # The program the shell started is the oldest process in the
-        # foreground, kitty otherwise takes the newest, such as a language
-        # server started by an editor or agent
-        cwd = window.get_cwd_of_child(oldest=True) or ""
-        oldest = min(window.child.foreground_processes, key=lambda p: p["pid"], default=None)
-        command = " ".join((oldest and oldest["cmdline"]) or window.child.cmdline)
-        lines.append(
-            f"window {i}: title {window.title!r}, cwd {_home_relative(cwd)}, running: {command}"
-        )
-        if window.last_cmd_cmdline:
-            lines.append(
-                f"  last command: {window.last_cmd_cmdline} (exit status {window.last_cmd_exit_status})"
-            )
-        if cwd and (root := _git(cwd, "rev-parse", "--show-toplevel")):
-            roots[root] = None
-
-    for root in roots:
-        lines += ["", *_repository_context(root)]
-
-    for i, window in enumerate(windows, 1):
-        if text := _screen_text(window):
-            lines += ["", f"## Window {i} screen (last lines)", text]
-
-    return "\n".join(lines) + "\n"
+def _window_snapshot(window: Window) -> dict:
+    """What namer is given about a window, see 'namer tab --help'."""
+    # The program the shell started is the oldest process in the foreground,
+    # kitty otherwise takes the newest, such as a language server started by an
+    # editor or agent
+    oldest = min(window.child.foreground_processes, key=lambda p: p["pid"], default=None)
+    command = (oldest and oldest["cmdline"]) or window.child.cmdline
+    return {
+        "title": window.title,
+        "cwd": window.get_cwd_of_child(oldest=True) or "",
+        "command": " ".join(command),
+        "last_command": window.last_cmd_cmdline or None,
+        "last_exit_status": window.last_cmd_exit_status,
+        "screen": _screen_text(window),
+    }
 
 
-def _normalise_title(title: str) -> str:
-    # The model is asked for words separated by spaces, but sometimes joins
-    # them with underscores, hyphens or CamelCase instead
-    title = title.strip()
-
-    if " " not in title:
-        title = title.replace("_", " ").replace("-", " ")
-        title = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", title)
-
-    return title.lower()
-
-
-def _generated_title(output_path: str) -> str | None:
+def _result(output_path: str) -> dict:
+    """namer's output, empty if it printed none."""
     try:
         with open(output_path, encoding="utf-8") as f:
-            result = json.loads(f.read())
+            result = json.load(f)
     except (OSError, ValueError):
-        return None
-
-    if "error" in result:
-        log_error(f"name_tab.py: {result['error']}: {result.get('message')}")
-        return None
-
-    # Without a clear purpose the model gives "none" as the label rather than null
-    title = result.get("label")
-    if not result.get("has_clear_purpose") or not isinstance(title, str):
-        return None
-    title = _normalise_title(title)
-    return title if title and title.lower() not in ("none", "null") else None
+        return {}
+    return result if isinstance(result, dict) else {}
 
 
-def _run_name_tab(context_path: str, output_path: str, log_path: str, done) -> None:
-    """Run name-tab in the background, then call done(exit_code) on kitty's
-    main thread, with None if it took longer than NAME_TAB_TIMEOUT seconds."""
+def _unlink(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _run_namer(args: list[str], output_path: str, log_path: str, done) -> None:
+    """Run namer with args in the background, then call done(exit_code) on
+    kitty's main thread, with None if it took longer than NAMER_TIMEOUT seconds."""
     with open(output_path, "w") as output, open(log_path, "w") as log:
         process = subprocess.Popen(
-            [NAME_TAB, "--json", context_path],
+            [NAMER, *args],
             env={**os.environ, "PATH": HELPER_PATH},
             stdin=subprocess.DEVNULL,
             stdout=output,
@@ -237,7 +142,7 @@ def _run_name_tab(context_path: str, output_path: str, log_path: str, done) -> N
             pass
         finish(None)
 
-    timeout_timer = add_timer(on_timeout, NAME_TAB_TIMEOUT, False)
+    timeout_timer = add_timer(on_timeout, NAMER_TIMEOUT, False)
     try:
         get_boss().monitor_pid(process.pid, on_exit)
     except RuntimeError:
@@ -252,12 +157,15 @@ def handle_result(
     window = boss.window_id_map.get(target_window_id)
     tab = window.tabref() if window is not None else None
     # Also refuse tabs that are already being named
-    if NAME_TAB is None or tab is None or hasattr(tab, NAMING_ATTR):
+    if NAMER is None or tab is None or hasattr(tab, NAMING_ATTR):
         boss.ring_bell_if_allowed()
         return
 
     tab_id = tab.id
+    snapshot_path = None
 
+    # Only what kitty knows is collected here, on its main thread, the rest by
+    # namer in the background
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         stem = os.path.join(DATA_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}-tab{tab_id}")
@@ -266,10 +174,14 @@ def handle_result(
             f"{stem}.json",
             f"{stem}.log",
         )
-        with open(context_path, "w", encoding="utf-8") as f:
-            f.write(_tab_context(tab))
+        snapshot = {"windows": [_window_snapshot(w) for w in tab]}
+        fd, snapshot_path = tempfile.mkstemp(prefix="kitty-name-tab-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
     except Exception as e:
-        log_error(f"name_tab.py: failed to collect context: {e}")
+        log_error(f"name_tab.py: failed to collect snapshot: {e}")
+        if snapshot_path is not None:
+            _unlink(snapshot_path)
         boss.ring_bell_if_allowed()
         return
 
@@ -279,20 +191,30 @@ def handle_result(
     tab.mark_tab_bar_dirty()
 
     def done(exit_code: int | None) -> None:
+        _unlink(snapshot_path)
         tab = boss.tab_for_id(tab_id)
         if tab is None:
             return
         previous_name = getattr(tab, NAMING_ATTR)
         delattr(tab, NAMING_ATTR)
-        if exit_code != 0:
+
+        result = _result(output_path)
+        if "error" in result:
+            log_error(f"name_tab.py: {result['error']}: {result.get('message')}")
+        elif exit_code != 0:
             log_error(
-                f"name_tab.py: name-tab failed with exit code {exit_code}, see {log_path}"
+                f"name_tab.py: namer failed with exit code {exit_code}, see {log_path}"
             )
-        title = _generated_title(output_path) if exit_code == 0 else None
+
+        # namer gives no label when the model finds no clear purpose
+        label = result.get("label") if exit_code == 0 else None
         # Keep names given while the model was running
-        if title and tab.name == previous_name:
+        if isinstance(label, str) and label and tab.name == previous_name:
             match = STATUS_TAG.match(previous_name)
-            tab.set_title((match.group(0) if match else "") + title)
+            name = (match.group(0) if match else "") + label
+            if isinstance(icon := result.get("icon"), str) and icon:
+                setattr(tab, REPICK_ICON_ATTR, (name, icon))
+            tab.set_title(name)
         else:
             # Stop drawing the spinner
             tab.mark_tab_bar_dirty()
@@ -308,8 +230,14 @@ def handle_result(
             pass
 
     try:
-        _run_name_tab(context_path, output_path, log_path, done)
+        _run_namer(
+            ["tab", "--save-context", context_path, snapshot_path],
+            output_path,
+            log_path,
+            done,
+        )
     except OSError as e:
-        log_error(f"name_tab.py: failed to run name-tab: {e}")
+        log_error(f"name_tab.py: failed to run namer: {e}")
+        _unlink(snapshot_path)
         delattr(tab, NAMING_ATTR)
         tab.mark_tab_bar_dirty()

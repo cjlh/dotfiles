@@ -5,13 +5,13 @@
 # CCUSAGE_REFRESH_INTERVAL seconds.
 #
 # Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
-# mode the icon is picked by the pick-icon script from this repo's scripts
+# mode the icon is picked by the namer script from this repo's scripts
 # package, which is run in the background whenever a tab is renamed, see
-# PickedIcons. If it fails the tab shows RENAMED_TAB_FIXED_ICON until renamed.
+# PickedIcons, unless name_tab.py picked it with the tab's name. If it fails the tab shows RENAMED_TAB_FIXED_ICON until renamed.
 # Names starting with a status tag, such as "[done] some task", show the
 # status's icon in place of the tag instead, see STATUS_TAG_ICONS.
 #
-# While name_tab.py generates a tab's name, or pick-icon picks its icon, the icon
+# While name_tab.py generates a tab's name, or namer picks its icon, the icon
 # is replaced by a spinner, which a timer animates only while some tab is
 # waiting. Redraws that change nothing but what is drawn, such as the spinner's,
 # set DRAW_ONLY_ATTR so that watchers can skip their work, see
@@ -62,7 +62,7 @@ LOADED_AT = time.monotonic()
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
-PICK_ICON_TIMEOUT = 120  # seconds, its first run on a machine builds its dependencies
+NAMER_TIMEOUT = 120  # seconds, its first run on a machine builds its dependencies
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH.
 HELPER_PATH = os.pathsep.join(
@@ -72,14 +72,14 @@ HELPER_PATH = os.pathsep.join(
         os.environ.get("PATH", ""),
     ]
 )
-PICK_ICON = shutil.which("pick-icon", path=HELPER_PATH)
+NAMER = shutil.which("namer", path=HELPER_PATH)
 
 TabIconMode = Literal["dynamic", "fixed"]
 
-# "dynamic" has the pick-icon script pick an icon to suit the tab's name, which
+# "dynamic" has the namer script pick an icon to suit the tab's name, which
 # needs both it and uv to be present
 RENAMED_TAB_ICON_MODE: TabIconMode = (
-    "dynamic" if PICK_ICON and shutil.which("uv", path=HELPER_PATH) else "fixed"
+    "dynamic" if NAMER and shutil.which("uv", path=HELPER_PATH) else "fixed"
 )
 
 # Alternatives: ✎, ★, ✦, ⚐
@@ -97,7 +97,8 @@ STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 NAMING_ATTR = "name_tab_previous_name"
 
 # Set on tabs by name_tab.py to have their icon picked anew, rather than taken
-# from pick-icon's cache, must match there
+# from namer's cache, or to the name it gave them and the icon picked with it.
+# Must match there.
 REPICK_ICON_ATTR = "tab_bar_repick_icon"
 
 # Set on renamed tabs to their TabIcon in "dynamic" mode
@@ -363,15 +364,16 @@ class TabIcon:
     """The icon of a renamed tab, picked for the name it had then."""
 
     name: str
-    refresh: bool = False  # picked anew rather than from pick-icon's cache
+    refresh: bool = False  # picked anew rather than from namer's cache
     is_loading: bool = True
-    icon: str | None = None  # None once loaded if pick-icon failed
+    icon: str | None = None  # None once loaded if namer failed
 
 
 class PickedIcons:
-    """Icons for renamed tabs picked by the pick-icon script, kept on each tab
-    as a TabIcon. A tab's icon is picked again whenever it is renamed, or when
-    name_tab.py asks for it to be. Tabs waiting for an icon are picked together
+    """Icons for renamed tabs picked by the namer script, kept on each tab as
+    a TabIcon. A tab's icon is picked again whenever it is renamed, or when
+    name_tab.py asks for it to be, unless name_tab.py picked it along with the
+    tab's name. Tabs waiting for an icon are picked together
     in the background, one run at a time."""
 
     def __init__(self) -> None:
@@ -385,6 +387,16 @@ class PickedIcons:
         if tab_icon is None or tab_icon.name != tab.name or refresh:
             if refresh:
                 delattr(tab, REPICK_ICON_ATTR)
+            if isinstance(refresh, tuple):
+                name, icon = refresh
+                # Only single cell icons, anything else would break the layout.
+                if name == tab.name and wcswidth(icon) == 1:
+                    tab_icon = TabIcon(tab.name, is_loading=False, icon=icon)
+                    setattr(tab, TAB_ICON_ATTR, tab_icon)
+                    return icon
+                # Renamed since, which tabs whose status tag hides their icon
+                # can be before it is ever drawn
+                refresh = False
             tab_icon = TabIcon(tab.name, refresh)
             setattr(tab, TAB_ICON_ATTR, tab_icon)
             self.queue.append((tab.id, tab_icon))
@@ -409,7 +421,7 @@ class PickedIcons:
         if not self.queue:
             return
 
-        # pick-icon refreshes every name in a run or none of them.
+        # namer refreshes every name in a run or none of them.
         refresh = self.queue[0][1].refresh
         picking = [tab_icon for _, tab_icon in self.queue if tab_icon.refresh == refresh]
         self.queue = [item for item in self.queue if item[1].refresh != refresh]
@@ -438,7 +450,7 @@ class PickedIcons:
                         icons = dict(zip(names, lines))
                 if not icons:
                     log_error(
-                        f"tab_bar.py: pick-icon failed with exit code {exit_code}"
+                        f"tab_bar.py: namer failed with exit code {exit_code}"
                     )
             except OSError:
                 pass
@@ -447,12 +459,12 @@ class PickedIcons:
             finish(icons)
 
         try:
-            fd, temp_path = tempfile.mkstemp(prefix="kitty-pick-icon-")
+            fd, temp_path = tempfile.mkstemp(prefix="kitty-namer-")
             os.close(fd)
             _run_monitored(
-                [PICK_ICON, *(["--refresh"] if refresh else []), "--", *names],
+                [NAMER, "icon", *(["--refresh"] if refresh else []), "--", *names],
                 temp_path,
-                PICK_ICON_TIMEOUT,
+                NAMER_TIMEOUT,
                 done,
                 {**os.environ, "PATH": HELPER_PATH},
             )
