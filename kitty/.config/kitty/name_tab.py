@@ -145,8 +145,12 @@ def _tab_context(tab: Tab) -> str:
     roots: dict[str, None] = {}  # repository roots in window order
 
     for i, window in enumerate(windows, 1):
-        cwd = window.cwd_of_child or ""
-        command = " ".join(window.child.foreground_cmdline)
+        # The program the shell started is the oldest process in the
+        # foreground, kitty otherwise takes the newest, such as a language
+        # server started by an editor or agent
+        cwd = window.get_cwd_of_child(oldest=True) or ""
+        oldest = min(window.child.foreground_processes, key=lambda p: p["pid"], default=None)
+        command = " ".join((oldest and oldest["cmdline"]) or window.child.cmdline)
         lines.append(
             f"window {i}: title {window.title!r}, cwd {_home_relative(cwd)}, running: {command}"
         )
@@ -189,8 +193,8 @@ def _generated_title(output_path: str) -> str | None:
         log_error(f"name_tab.py: {result['error']}: {result.get('message')}")
         return None
 
-    # Without a clear purpose the model gives "none" as the title rather than null
-    title = result.get("title")
+    # Without a clear purpose the model gives "none" as the label rather than null
+    title = result.get("label")
     if not result.get("has_clear_purpose") or not isinstance(title, str):
         return None
     title = _normalise_title(title)

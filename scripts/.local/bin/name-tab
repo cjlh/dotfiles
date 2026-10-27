@@ -47,17 +47,20 @@ Only use what the snapshot shows. Many tabs have no clear purpose, such as an \
 idle shell, a fresh login, a system monitor or a shell just opened in a \
 project, and that is a normal answer. Programs being open, a working \
 directory, a repository, its name or being on its main branch, or a login \
-message alone are not a purpose. A purpose needs evidence of specific work in \
-this tab, such as uncommitted changes, commits on a branch or not yet pushed, \
-commands run against a project, or errors being investigated.
+message alone are not a purpose. A purpose needs something the user has \
+actually done in this tab that shows what they are working on, not just where \
+the tab is.
 
 The title should be 1 to 4 lowercase words separated by spaces, naming the \
 task as the user would name it themselves."""
 
 
-@fm.generable("The task a terminal tab is being used for")
-class TabName:
-    # Fields are generated in order, so the title follows the evidence for it.
+# The schema is shown to the model with the class name as its title, so the
+# name is a field that title can't be mistaken for, which it was when the field
+# was also called title.
+@fm.generable
+class TabAnalysis:
+    # Fields are generated in order, so the label follows the evidence for it.
     # The SDK only treats Optional[str], not str | None, as optional.
     key_datapoints: list[str] = fm.guide(
         "Facts about the work shown in the snapshot, such as the repository, "
@@ -72,9 +75,17 @@ class TabName:
         "One or two sentences describing the task and current activity, "
         "or none without a clear purpose"
     )
-    title: Optional[str] = fm.guide(
+    label: Optional[str] = fm.guide(
         "Short task-oriented title, or none without a clear purpose"
     )
+
+
+# apple-fm-sdk 0.2.1 drops both the description given to @fm.generable and the
+# options given to respond(generating=...), so the schema is made with its
+# description here and passed to respond(schema=...) instead.
+SCHEMA = TabAnalysis.generation_schema(
+    description="The task a terminal tab is being used for"
+)
 
 
 class Arguments(argparse.Namespace):
@@ -121,7 +132,7 @@ async def count_tokens(model, context: str) -> dict[str, int]:
     try:
         return {
             "instructions": await model.token_count(instructions=INSTRUCTIONS),
-            "schema": await model.token_count(TabName.generation_schema()),
+            "schema": await model.token_count(SCHEMA),
             "context": await model.token_count(context),
         }
     except fm.FoundationModelsError as e:
@@ -136,8 +147,8 @@ async def name_tab(context: str, options) -> tuple[dict, float]:
     started = time.perf_counter()
 
     try:
-        response = await session.respond(context, generating=TabName, options=options)
-        result = asdict(response)
+        content = await session.respond(context, schema=SCHEMA, options=options)
+        result = asdict(TabAnalysis._from_generated_content(content))
     except fm.FoundationModelsError as e:
         result = {"error": type(e).__name__, "message": str(e)}
 
@@ -163,7 +174,7 @@ def print_report(
 
     print(f"   purpose:     {result['has_clear_purpose']}")
     print(f"   description: {result['description']}")
-    print(f"   title:       \033[1m{result['title']}\033[0m")
+    print(f"   label:       \033[1m{result['label']}\033[0m")
 
 
 async def main(args: Arguments) -> int:

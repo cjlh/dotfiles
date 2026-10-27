@@ -397,10 +397,14 @@ async def model_icon_ids(fm, names: list[str]) -> dict[str, str]:
     Names that failed for other reasons, such as rate limiting, are left out
     so that they are retried next time."""
 
-    @fm.generable("An icon")
+    @fm.generable
     class Choice:
         icon: str = fm.guide("The chosen icon's id", anyOf=list(ICONS))
 
+    # apple-fm-sdk 0.2.1 drops the description given to @fm.generable (and the
+    # options given to respond(generating=...)), so the schema is made with its
+    # description here and passed to respond(schema=...) instead.
+    schema = Choice.generation_schema(description="An icon")
     icon_ids = {}
 
     for name in names:
@@ -408,7 +412,8 @@ async def model_icon_ids(fm, names: list[str]) -> dict[str, str]:
         session = fm.LanguageModelSession(instructions=INSTRUCTIONS)
 
         try:
-            response = await session.respond(f"Name: {name}", generating=Choice)
+            content = await session.respond(f"Name: {name}", schema=schema)
+            response = Choice._from_generated_content(content)
 
             if response.icon in ICONS:
                 icon_ids[name] = response.icon
