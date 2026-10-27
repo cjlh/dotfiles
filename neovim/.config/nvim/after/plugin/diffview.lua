@@ -1,4 +1,4 @@
-vim.keymap.set('n', '<leader>Gd', function()
+vim.keymap.set('n', '<leader>GD', function()
     if next(require('diffview.lib').views) == nil then
         vim.cmd [[DiffviewOpen --imply-local]]
     else

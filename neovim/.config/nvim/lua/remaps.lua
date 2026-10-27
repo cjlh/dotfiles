@@ -27,11 +27,14 @@ vim.keymap.set({ 'n', 'v' }, '<leader>d', 'd', { desc = 'Delete to clipboard' })
 -- Paste over selected text
 vim.keymap.set('x', 'p', '"_dP', { desc = 'Paste over selected text' })
 
--- Clear highlights and redraw
-vim.keymap.set('n', '<C-L>', function()
-    vim.cmd.nohlsearch()
-    vim.cmd 'redraw'
-end, { desc = 'Clear highlights' })
+-- Clear search highlights
+vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR><Esc>', { desc = 'Clear highlights' })
+
+-- Move between windows
+vim.keymap.set('n', '<C-h>', '<C-w>h', { desc = 'Move to left window' })
+vim.keymap.set('n', '<C-j>', '<C-w>j', { desc = 'Move to window below' })
+vim.keymap.set('n', '<C-k>', '<C-w>k', { desc = 'Move to window above' })
+vim.keymap.set('n', '<C-l>', '<C-w>l', { desc = 'Move to right window' })
 
 -- Move lines up and down in visual mode
 vim.keymap.set('v', 'J', ":m '>+1<CR>gv=gv", { desc = 'Move line down' })
