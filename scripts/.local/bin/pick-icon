@@ -3,6 +3,9 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = []
+# [[tool.uv.index]]
+# url = "https://pypi.org/simple"
+# default = true
 # ///
 
 # Picks an icon to show next to a name, such as a renamed kitty tab.
@@ -10,14 +13,15 @@
 # On macOS 26 and later, Apple's on-device model picks the icon whose meaning
 # best matches the name. Elsewhere, or when the model is unavailable or declines
 # to pick one, the icon is picked from a hash of the name. Either way a name
-# always gets the same icon, as the model's picks are cached.
+# always gets the same icon, as the model's picks are cached, until it is
+# picked anew with --refresh.
 #
 # Apple's SDK is built from source and needs Xcode 26 or later, so it is only
 # added to a second run of this script on Macs with it (see pick_with_model)
 # rather than declared above, where a failing build would stop the script
 # starting. Without it a warning is shown, in yellow when run from a terminal
-# and otherwise as a notification only the first time, and the icons are
-# picked from hashes.
+# and otherwise as a notification only the first time for each kind of warning,
+# and the icons are picked from hashes.
 
 import argparse
 import asyncio
@@ -72,7 +76,7 @@ ICONS = {
     "telephone": ("☏", "calls, meetings, contact, support"),
     "radioactive": (
         "☢",
-        "hazardous changes, nuclear, toxic code, contamination, testing",
+        "hazardous changes, nuclear, toxic code, contamination",
     ),
     "menu": ("≡", "menus, lists, logs"),
     "smiley": ("☻", "people, users, social, happiness"),
@@ -104,10 +108,39 @@ ICONS = {
     "hook-arrow": ("↩", "reverting, undo, returns, replies"),
     "clockwise-arrow": ("↷", "redo, rotation, turning"),
     "circle-arrow": ("↻", "retries, refreshing, loops, reloading"),
-    "harpoons": ("⇋", "sync, migration, exchange, two-way, ping, peer-to-peer"),
+    "harpoons": ("⇋", "sync, two-way sync, mirroring, replication"),
     "arrow-from-wall": ("⇰", "exports, piping, leaving, formatting"),
     "arrow-to-corner": ("⇱", "home, top level, back to the start"),
     "timer": ("⏱", "clock, scheduled jobs, cron jobs, measurement, timing"),
+    "check": ("✓", "writing or running tests, unit and e2e tests, QA, test coverage"),
+    "alembic": ("⚗", "research, experiments, prototypes, R&D, proofs of concept"),
+    "sum": ("∑", "statistics, analysis, metrics, maths, aggregation, reports"),
+    "atom": ("⚛", "science, physics, React, frontend components"),
+    "scales": (
+        "⚖",
+        "legal, compliance, licensing, comparisons, trade-offs, evaluations, fairness",
+    ),
+    "sine-wave": (
+        "∿",
+        "audio, speech, voice, signals, diarization, speaker separation, dubbing",
+    ),
+    "left-right-arrows": ("⇄", "translation, localisation, i18n, conversion"),
+    "play": ("⏵", "video, media, playback, editing footage"),
+    "nabla": ("∇", "ML models, training, fine-tuning, gradients, optimisation"),
+    "alternative-key": ("⎇", "git branches, merges, pull requests, version control"),
+    "wheel": ("☸", "containers, Docker, Kubernetes, Helm, pods, container clusters"),
+    "squared-key": ("⚿", "secrets, credentials, API keys, encryption"),
+    "prompt": ("❯", "shell, CLI, terminal, shell scripts"),
+    "lambda": ("λ", "functions, serverless, functional programming"),
+    "section": ("§", "specs, RFCs, design docs, policies"),
+    "pie": ("◔", "dashboards, charts, monitoring, progress"),
+    "squared-plus": ("⊞", "notebooks, Jupyter, tables, spreadsheets"),
+    "triple-arrows": ("⇶", "data pipelines, ETL, message queues, batch jobs"),
+    # Render poorly with the current font
+    # "ferry": ("⛴", "containers, Docker, images"),
+    # "chains": ("⛓", "dependencies, supply chain, linking"),
+    # Not needed yet
+    # "bowtie": ("⋈", "joins, SQL, queries, data modelling"),
 }
 
 INSTRUCTIONS = """\
@@ -139,21 +172,59 @@ SDK = "apple-fm-sdk==0.2.1"
 # Set for the run of this script that has the SDK
 WITH_SDK_ENV = "PICK_ICON_WITH_SDK"
 
-XCODE_MISSING_WARNING = (
-    "Xcode not found. Install with the Mac App Store to use intelligent icon selection"
-)
+# Where the Mac App Store installs Xcode's developer directory
+XCODE_DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
 
-XCODE_OUTDATED_WARNING = (
-    "Xcode {version} found, but 26 or later is needed. "
-    "Update with the Mac App Store to use intelligent icon selection"
-)
+WARNINGS = {
+    "xcode-missing": (
+        "Xcode not found. Install with the Mac App Store "
+        "to use intelligent icon selection."
+    ),
+    "xcode-unselected": (
+        "Xcode found, but the Command Line Tools are selected. "
+        f"Run 'sudo xcode-select -s {XCODE_DEVELOPER_DIR}' "
+        "to use intelligent icon selection."
+    ),
+    "xcode-outdated": (
+        "Xcode {version} found, but 26 or later is needed. "
+        "Update with the Mac App Store to use intelligent icon selection."
+    ),
+    "xcode-license": (
+        "Xcode license not accepted. Run 'sudo xcodebuild -license accept' "
+        "to use intelligent icon selection."
+    ),
+    "sdk": (
+        "Couldn't install or load Foundation Models SDK for Python. Run pick-icon in a terminal "
+        "to see why."
+    ),
+    "model-disabled": (
+        "Apple Intelligence not enabled. Turn on in System Settings > "
+        "Apple Intelligence & Siri to use intelligent icon selection."
+    ),
+    "model-not-ready": (
+        "Apple Intelligence model not ready, it may still be downloading. "
+        "Falling back to hash-based icon selection."
+    ),
+    "model-unavailable": (
+        "Apple Intelligence model unavailable. Falling back to hash-based icon selection."
+    ),
+}
 
-# Only send warning notification once - do not warn if this file exists
-XCODE_WARNED_PATH = os.path.join(CACHE_DIR, ".xcode-warned")
+# Warning kinds for the SDK's reasons the model is unavailable. Ineligible
+# devices aren't warned about, like Macs without macOS 26.
+MODEL_UNAVAILABLE_WARNINGS = {
+    "APPLE_INTELLIGENCE_NOT_ENABLED": "model-disabled",
+    "MODEL_NOT_READY": "model-not-ready",
+    "UNKNOWN": "model-unavailable",
+}
+
+# Only send each kind of warning notification once - do not warn if its file exists
+WARNED_PATH = os.path.join(CACHE_DIR, ".warned-{kind}")
 
 
 class Arguments(argparse.Namespace):
     names: list[str] = []
+    refresh: bool = False
 
 
 def parse_arguments() -> Arguments:
@@ -161,6 +232,11 @@ def parse_arguments() -> Arguments:
         description="Print an icon for each name, one per line in the same order."
     )
     _ = parser.add_argument("names", nargs="+", metavar="NAME")
+    _ = parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="have the model pick the names' icons anew rather than use cached ones",
+    )
     return parser.parse_args(namespace=Arguments())
 
 
@@ -181,53 +257,81 @@ def model_supported() -> bool:
         return False
 
 
-def xcode_warning() -> str | None:
-    """A warning if the active developer directory isn't a full Xcode 26 or
-    later, which the SDK's build requires. Unlike running swift, xcode-select
-    never offers to install the Command Line Tools."""
+def xcode_warning() -> tuple[str, str] | None:
+    """The kind and message of a warning if the active developer directory
+    isn't a full Xcode 26 or later with its license accepted, which the SDK's
+    build requires. Unlike running swift, xcode-select never offers to install
+    the Command Line Tools."""
     try:
         developer_dir = subprocess.run(
             ["xcode-select", "-p"], capture_output=True, text=True, check=True
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        return XCODE_MISSING_WARNING
+        developer_dir = ""
 
-    if "CommandLineTools" in developer_dir:
-        return XCODE_MISSING_WARNING
+    if not developer_dir or "CommandLineTools" in developer_dir:
+        # The build doesn't use Xcode unless it's selected, even when installed
+        if os.path.isdir(XCODE_DEVELOPER_DIR):
+            return "xcode-unselected", WARNINGS["xcode-unselected"]
+
+        return "xcode-missing", WARNINGS["xcode-missing"]
+
+    xcodebuild = os.path.join(developer_dir, "usr/bin/xcodebuild")
 
     try:
         output = subprocess.run(
-            [os.path.join(developer_dir, "usr/bin/xcodebuild"), "-version"],
+            [xcodebuild, "-version"],
             capture_output=True,
             text=True,
             check=True,
             timeout=30,
         ).stdout
     except (OSError, subprocess.SubprocessError):
-        return None  # e.g. its license isn't accepted, leave it to the build
+        return None  # Leave it to the build
 
     match = re.search(r"Xcode\s+(\d+)(\.\d+)*", output)
 
     if match and int(match.group(1)) < 26:
-        return XCODE_OUTDATED_WARNING.format(version=match.group(0).split()[1])
+        version = match.group(0).split()[1]
+        return "xcode-outdated", WARNINGS["xcode-outdated"].format(version=version)
+
+    # Exits non-zero only when the license isn't accepted
+    try:
+        accepted = (
+            subprocess.run(
+                [xcodebuild, "-license", "check"], capture_output=True, timeout=30
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None  # Leave it to the build
+
+    if not accepted:
+        return "xcode-license", WARNINGS["xcode-license"]
 
     return None
 
 
-def warn(message: str) -> None:
+def warn(kind: str, message: str | None = None) -> None:
+    """Warns that the model isn't used, with WARNINGS[kind] unless a message
+    is given."""
+    message = message or WARNINGS[kind]
+
     if sys.stderr.isatty():
         print(f"\033[33m{message}\033[0m", file=sys.stderr)
         return
 
     # If this script is executed non-interactively (e.g. by kitty), notify that we aren't
     # using the Foundation model.
-    if os.path.exists(XCODE_WARNED_PATH):
+    warned_path = WARNED_PATH.format(kind=kind)
+
+    if os.path.exists(warned_path):
         return
 
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
 
-        with open(XCODE_WARNED_PATH, "w"):
+        with open(warned_path, "w"):
             pass
 
         subprocess.run(
@@ -258,25 +362,34 @@ def pick_with_model(names: list[str]) -> None:
         return
 
     # Show build errors when run from a terminal, otherwise there is no one to read them.
-    subprocess.run(
-        [uv, "run", "--quiet", "--with", SDK, "--script", __file__, *names],
+    # That run warns itself if the model is unavailable, its stderr is ours to warn on.
+    result = subprocess.run(
+        [uv, "run", "--quiet", "--with", SDK, "--script", __file__, "--", *names],
         env={**os.environ, WITH_SDK_ENV: "1"},
         stdout=subprocess.DEVNULL,
         stderr=None if sys.stderr.isatty() else subprocess.DEVNULL,
         check=False,
     )
 
+    # Fails if uv can't install the SDK or that run can't load it
+    if result.returncode != 0:
+        warn("sdk")
+
 
 def load_model():
-    """The Foundation Models SDK if the on-device model is available."""
-    try:
-        import apple_fm_sdk as fm
+    """The Foundation Models SDK if the on-device model is available, otherwise
+    warns why not. Errors loading the SDK are left to fail this run."""
+    import apple_fm_sdk as fm
 
-        available, _ = fm.SystemLanguageModel().is_available()
-    except Exception:  # Not installed or not working, use hashed icons
+    available, reason = fm.SystemLanguageModel().is_available()
+
+    if not available:
+        if (kind := MODEL_UNAVAILABLE_WARNINGS.get(reason.name)) is not None:
+            warn(kind)
+
         return None
 
-    return fm if available else None
+    return fm
 
 
 async def model_icon_ids(fm, names: list[str]) -> dict[str, str]:
@@ -358,14 +471,18 @@ if __name__ == "__main__":
         sys.exit()
 
     icon_ids = read_cache()
-    missing = [name for name in dict.fromkeys(args.names) if name not in icon_ids]
+    missing = [
+        name
+        for name in dict.fromkeys(args.names)
+        if args.refresh or name not in icon_ids
+    ]
 
     if missing and model_supported():
         if (warning := xcode_warning()) is None:
             pick_with_model(missing)
             icon_ids = read_cache()
         else:
-            warn(warning)
+            warn(*warning)
 
     # kitty may run this without a UTF-8 locale
     sys.stdout.reconfigure(encoding="utf-8")

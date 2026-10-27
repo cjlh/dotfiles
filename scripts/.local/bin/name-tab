@@ -3,6 +3,9 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["apple-fm-sdk==0.2.1"]
+# [[tool.uv.index]]
+# url = "https://pypi.org/simple"
+# default = true
 # ///
 
 # Prototype harness for naming a kitty tab from what it contains, using Apple's
@@ -139,7 +142,9 @@ async def name_tab(context: str, options) -> tuple[dict, float]:
     return result, time.perf_counter() - started
 
 
-def print_report(name: str, run: int, tokens: dict, budget: int, result: dict, seconds: float):
+def print_report(
+    name: str, run: int, tokens: dict, budget: int, result: dict, seconds: float
+):
     used = sum(tokens.values())
     print(f"== {name} (run {run}) - {seconds:.2f}s")
     print(

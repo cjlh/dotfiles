@@ -6,7 +6,8 @@
 #
 # Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
 # mode the icon is picked by the pick-icon script from this repo's scripts
-# package, which is run in the background for names without an icon yet.
+# package, which is run in the background whenever a tab is renamed, see
+# PickedIcons. If it fails the tab shows RENAMED_TAB_FIXED_ICON until renamed.
 # Names starting with a status tag, such as "[done] some task", show the
 # status's icon in place of the tag instead, see STATUS_TAG_ICONS.
 #
@@ -15,6 +16,10 @@
 # waiting. Redraws that change nothing but what is drawn, such as the spinner's,
 # set DRAW_ONLY_ATTR so that watchers can skip their work, see
 # _mark_tab_bar_dirty.
+#
+# kitty runs this file again when its config is reloaded, see _shared. It draws
+# with the copy loaded by the previous reload though, as it only forgets that
+# copy after applying the reloaded config, so edits here take two reloads.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
 import json
@@ -26,6 +31,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from typing import Literal
 
 from kitty.boss import get_boss
@@ -51,6 +57,8 @@ CCUSAGE_TIMEOUT = 120  # seconds before a ccusage run is killed
 DISK_TIMEOUT = 5  # seconds before a disk query is abandoned
 DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
+# When this copy of the module was loaded, see _shared
+LOADED_AT = time.monotonic()
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
@@ -87,6 +95,13 @@ STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 
 # Set on tabs by name_tab.py while it generates their name, must match there
 NAMING_ATTR = "name_tab_previous_name"
+
+# Set on tabs by name_tab.py to have their icon picked anew, rather than taken
+# from pick-icon's cache, must match there
+REPICK_ICON_ATTR = "tab_bar_repick_icon"
+
+# Set on renamed tabs to their TabIcon in "dynamic" mode
+TAB_ICON_ATTR = "tab_bar_icon"
 
 # Shown in place of the icon of tabs being named or waiting for their icon,
 # one frame per interval
@@ -343,52 +358,85 @@ class AgentUsageProvider(StatusProvider):
         return f"{self.icon} {cost:,.2f}" if cost > 0 else ""
 
 
+@dataclass
+class TabIcon:
+    """The icon of a renamed tab, picked for the name it had then."""
+
+    name: str
+    refresh: bool = False  # picked anew rather than from pick-icon's cache
+    is_loading: bool = True
+    icon: str | None = None  # None once loaded if pick-icon failed
+
+
 class PickedIcons:
-    """Icons for renamed tabs picked by the pick-icon script. Names without an
-    icon yet are picked together in the background, one run at a time."""
+    """Icons for renamed tabs picked by the pick-icon script, kept on each tab
+    as a TabIcon. A tab's icon is picked again whenever it is renamed, or when
+    name_tab.py asks for it to be. Tabs waiting for an icon are picked together
+    in the background, one run at a time."""
 
     def __init__(self) -> None:
-        self.icons = {}  # name -> icon, None if pick-icon failed
-        self.queue = []  # names waiting for the next run, oldest first
-        self.picking = []  # names being picked by the current run
+        self.queue = []  # (tab id, TabIcon) waiting for the next run, oldest first
+        self.running = False
 
-    def icon(self, name: str) -> str:
-        if name in self.icons:
-            return self.icons[name] or RENAMED_TAB_FIXED_ICON
-        if name not in self.queue and name not in self.picking:
-            self.queue.append(name)
+    def icon(self, tab) -> str:
+        tab_icon = getattr(tab, TAB_ICON_ATTR, None)
+        refresh = getattr(tab, REPICK_ICON_ATTR, False)
+
+        if tab_icon is None or tab_icon.name != tab.name or refresh:
+            if refresh:
+                delattr(tab, REPICK_ICON_ATTR)
+            tab_icon = TabIcon(tab.name, refresh)
+            setattr(tab, TAB_ICON_ATTR, tab_icon)
+            self.queue.append((tab.id, tab_icon))
             # Start the run after drawing rather than in the middle of it.
             add_timer(self._run, 0, False)
-        return _spinner().frame()
 
-    def is_picking(self, name: str) -> bool:
-        return name in self.queue or name in self.picking
+        if tab_icon.is_loading:
+            return _spinner().frame()
+        return tab_icon.icon or RENAMED_TAB_FIXED_ICON
 
     def _run(self, timer_id=None) -> None:
-        if self.picking:
+        if self.running:
             return  # The queue is picked once the current run finishes.
 
-        # Skip names that were renamed again before their turn.
-        names = {tab.name for tab in get_boss().all_tabs}
-        self.picking = [name for name in self.queue if name in names]
-        self.queue.clear()
-        if not self.picking:
+        # Skip tabs that were closed or renamed again before their turn.
+        boss = get_boss()
+        self.queue = [
+            (tab_id, tab_icon)
+            for tab_id, tab_icon in self.queue
+            if getattr(boss.tab_for_id(tab_id), TAB_ICON_ATTR, None) is tab_icon
+        ]
+        if not self.queue:
             return
 
+        # pick-icon refreshes every name in a run or none of them.
+        refresh = self.queue[0][1].refresh
+        picking = [tab_icon for _, tab_icon in self.queue if tab_icon.refresh == refresh]
+        self.queue = [item for item in self.queue if item[1].refresh != refresh]
+        names = list(dict.fromkeys(tab_icon.name for tab_icon in picking))
+        self.running = True
         temp_path = None
 
+        def finish(icons: dict[str, str]) -> None:
+            for tab_icon in picking:
+                tab_icon.icon = icons.get(tab_icon.name)
+                tab_icon.is_loading = False
+            self.running = False
+            _mark_tab_bar_dirty()
+            self._run()
+
         def done(exit_code: int | None) -> None:
-            icons = [None] * len(self.picking)
+            icons = {}
             try:
                 if exit_code == 0:
                     with open(temp_path, encoding="utf-8") as f:
                         lines = f.read().splitlines()
                     # Only single cell icons, anything else would break the layout.
-                    if len(lines) == len(icons) and all(
+                    if len(lines) == len(names) and all(
                         wcswidth(line) == 1 for line in lines
                     ):
-                        icons = lines
-                if icons[0] is None:
+                        icons = dict(zip(names, lines))
+                if not icons:
                     log_error(
                         f"tab_bar.py: pick-icon failed with exit code {exit_code}"
                     )
@@ -396,16 +444,13 @@ class PickedIcons:
                 pass
             finally:
                 _unlink(temp_path)
-            self.icons.update(zip(self.picking, icons))
-            self.picking = []
-            _mark_tab_bar_dirty()
-            self._run()
+            finish(icons)
 
         try:
             fd, temp_path = tempfile.mkstemp(prefix="kitty-pick-icon-")
             os.close(fd)
             _run_monitored(
-                [PICK_ICON, *self.picking],
+                [PICK_ICON, *(["--refresh"] if refresh else []), "--", *names],
                 temp_path,
                 PICK_ICON_TIMEOUT,
                 done,
@@ -413,21 +458,42 @@ class PickedIcons:
             )
         except (OSError, subprocess.SubprocessError):
             _unlink(temp_path)
-            self.icons.update(dict.fromkeys(self.picking))
-            self.picking = []
-            _mark_tab_bar_dirty()
+            finish({})
 
 
-def _shared(name: str, create):
+def _shared(name: str, create, retire=None):
     """The object called name, created on first use and shared by every copy
     of this module. kitty runs this file again when its config is reloaded, so
     state is kept on the boss, which outlives reloads, to stop each copy from
-    adding its own timer and running its own refreshes."""
+    adding its own timer and running its own refreshes.
+
+    An object created by an earlier copy runs that copy's code, which may have
+    changed since, so it is replaced, after retire(old, new) stops its timers
+    and hands over its work. Callbacks of earlier copies that are still running
+    get the latest copy's object."""
     boss = get_boss()
-    attr = f"tab_bar_{name}"
-    if not hasattr(boss, attr):
-        setattr(boss, attr, create())
-    return getattr(boss, attr)
+    attr = f"tab_bar_shared_{name}"
+    shared = getattr(boss, attr, None)  # (load time of its copy, object)
+
+    if shared is not None and shared[0] >= LOADED_AT:
+        return shared[1]
+
+    # Copies from before objects were stored with their copy's load time
+    # stored them alone, under another name
+    if hasattr(boss, legacy_attr := f"tab_bar_{name}"):
+        shared = (float("-inf"), getattr(boss, legacy_attr))
+        delattr(boss, legacy_attr)
+
+    new = create()
+    if shared is not None and retire is not None:
+        retire(shared[1], new)
+    setattr(boss, attr, (LOADED_AT, new))
+    return new
+
+
+def _remove_timer(timer_id) -> None:
+    if timer_id is not None:
+        remove_timer(timer_id)
 
 
 class Spinner:
@@ -463,12 +529,21 @@ class Spinner:
             _mark_tab_bar_dirty(*tab_managers)
 
 
+def _hand_over_icons(old: PickedIcons, new: PickedIcons) -> None:
+    # A run of the old one in progress still finishes, updating its tabs.
+    new.queue, old.queue = getattr(old, "queue", []), []
+    if new.queue:
+        add_timer(new._run, 0, False)
+
+
 def _picked_icons() -> PickedIcons:
-    return _shared("picked_icons", PickedIcons)
+    return _shared("tab_icons", PickedIcons, _hand_over_icons)
 
 
 def _spinner() -> Spinner:
-    return _shared("spinner", Spinner)
+    return _shared(
+        "spinner", Spinner, lambda old, new: _remove_timer(getattr(old, "timer_id", None))
+    )
 
 
 def _providers() -> tuple[StatusProvider, ...]:
@@ -596,11 +671,11 @@ def _short_title(title: str) -> str:
     return short
 
 
-def _renamed_tab_icon(name: str) -> str:
+def _renamed_tab_icon(tab) -> str:
     if RENAMED_TAB_ICON_MODE == "fixed":
         return RENAMED_TAB_FIXED_ICON
 
-    return _picked_icons().icon(name)
+    return _picked_icons().icon(tab)
 
 
 def _is_naming(tab) -> bool:
@@ -609,11 +684,8 @@ def _is_naming(tab) -> bool:
 
 def _is_waiting(tab) -> bool:
     """Whether tab shows a spinner, while being named or waiting for its icon."""
-    return _is_naming(tab) or (
-        bool(tab.name)
-        and RENAMED_TAB_ICON_MODE == "dynamic"
-        and _picked_icons().is_picking(tab.name)
-    )
+    tab_icon = getattr(tab, TAB_ICON_ATTR, None)
+    return _is_naming(tab) or (tab_icon is not None and tab_icon.is_loading)
 
 
 def _tab_title(tab: TabBarData) -> str:
@@ -626,7 +698,7 @@ def _tab_title(tab: TabBarData) -> str:
 
         if match and (icon := STATUS_TAG_ICONS.get(match.group(1).lower())):
             return f"{spinner or icon} {t.name[match.end() :]}".rstrip()
-        return f"{spinner or _renamed_tab_icon(t.name)} {tab.title}"
+        return f"{spinner or _renamed_tab_icon(t)} {tab.title}"
 
     short = _short_title(tab.title)
     return f"{spinner} {short}" if spinner else short
@@ -642,7 +714,7 @@ def draw_tab(
     is_last: bool,
     extra_data: ExtraData,
 ) -> int:
-    _shared("timer", _start_timer)
+    _shared("timer", _start_timer, lambda old, new: _remove_timer(old))
 
     tab = tab._replace(title=_tab_title(tab))
 

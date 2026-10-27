@@ -3,6 +3,9 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = ["rich"]
+# [[tool.uv.index]]
+# url = "https://pypi.org/simple"
+# default = true
 # ///
 
 import argparse

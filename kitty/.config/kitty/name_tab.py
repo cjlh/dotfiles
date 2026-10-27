@@ -9,7 +9,8 @@
 # While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
 # place of its icon. It is then renamed with the generated name, unless the
 # model finds no clear purpose or fails, or the tab was renamed meanwhile. A
-# status tag such as "[todo]" at the start of the previous name is kept.
+# status tag such as "[todo]" at the start of the previous name is kept. Either
+# way its icon is then picked anew by tab_bar.py.
 #
 # Each context file, the model's response and any errors from name-tab are kept
 # in DATA_DIR, as fixtures for evaluating the model with name-tab.
@@ -40,6 +41,8 @@ DATA_DIR = os.path.expanduser("~/.local/share/kitty/tab-names")
 # Set on tabs while their name is generated, to the name they had then, so
 # that tab_bar.py draws a spinner for them. Must match NAMING_ATTR there.
 NAMING_ATTR = "name_tab_previous_name"
+# Set on tabs to have tab_bar.py pick their icon anew. Must match REPICK_ICON_ATTR there.
+REPICK_ICON_ATTR = "tab_bar_repick_icon"
 # Must match STATUS_TAG in tab_bar.py
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 # Last lines of each window's screen to include
@@ -166,7 +169,7 @@ def _normalise_title(title: str) -> str:
     if " " not in title:
         title = title.replace("_", " ").replace("-", " ")
 
-    return title
+    return title.lower()
 
 
 def _generated_title(output_path: str) -> str | None:
@@ -260,6 +263,8 @@ def handle_result(
         return
 
     setattr(tab, NAMING_ATTR, tab.name)
+    # Picked once naming finishes, the spinner is shown in its place until then
+    setattr(tab, REPICK_ICON_ATTR, True)
     tab.mark_tab_bar_dirty()
 
     def done(exit_code: int | None) -> None:
