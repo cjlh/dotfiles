@@ -62,10 +62,11 @@ task as the user would name it themselves."""
 class TabAnalysis:
     # Fields are generated in order, so the label follows the evidence for it.
     # The SDK only treats Optional[str], not str | None, as optional.
+    # No examples, such as the repository or branch, nor a minimum number of
+    # items, as both had the model list or invent facts to show a purpose
     key_datapoints: list[str] = fm.guide(
-        "Facts about the work shown in the snapshot, such as the repository, "
-        "branch, files changed, commands run and errors shown",
-        min_items=1,
+        "Things the user has done in this tab that the snapshot shows, "
+        "empty if none",
         max_items=6,
     )
     has_clear_purpose: bool = fm.guide(

@@ -173,11 +173,12 @@ def _tab_context(tab: Tab) -> str:
 
 def _normalise_title(title: str) -> str:
     # The model is asked for words separated by spaces, but sometimes joins
-    # them with underscores or hyphens instead
+    # them with underscores, hyphens or CamelCase instead
     title = title.strip()
 
     if " " not in title:
         title = title.replace("_", " ").replace("-", " ")
+        title = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", title)
 
     return title.lower()
 
