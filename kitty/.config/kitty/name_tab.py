@@ -4,18 +4,20 @@
 # snapshot of the tab's windows (titles, working directories, running programs,
 # last commands and screen text) is named in the background by the namer script
 # from this repo's scripts package, which adds the state of the Git
-# repositories they are in and asks Apple's on-device model for a name and an
-# icon for it.
+# repositories they are in. A decision model, d1-2B, decides whether it shows
+# what the tab is being used for; only then does Apple's on-device model name
+# it, and d1-2B pick an icon for the name.
 #
 # While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
 # place of its icon. It is then renamed with the generated name and icon, unless
-# the model finds no clear purpose or fails, or the tab was renamed meanwhile. A
+# the models find no clear purpose or fail, or the tab was renamed meanwhile. A
 # status tag such as "[todo]" at the start of the previous name is kept. If the
 # tab isn't renamed, or no icon was picked with its name, tab_bar.py picks its
 # icon anew.
 #
-# Each context given to the model, its response and any errors from namer are
-# kept in DATA_DIR, as fixtures for evaluating the model with 'namer eval'.
+# Each context given to the models, their response (with d1-2B's probability
+# that the tab has a purpose) and any errors from namer are kept in DATA_DIR,
+# as fixtures for evaluating the models with 'namer eval'.
 #
 # Enable with: map ctrl+alt+shift+r kitten name_tab.py
 
@@ -50,7 +52,9 @@ REPICK_ICON_ATTR = "tab_bar_repick_icon"
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 # Last lines of each window's screen to include
 SCREEN_LINES = 40
-NAMER_TIMEOUT = 120  # seconds, its first run on a machine builds its dependencies
+# seconds; its first run on a machine installs the models' libraries and
+# downloads d1-2B (1.35 GB)
+NAMER_TIMEOUT = 600
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH,
 # and namer is run by uv
@@ -206,7 +210,7 @@ def handle_result(
                 f"name_tab.py: namer failed with exit code {exit_code}, see {log_path}"
             )
 
-        # namer gives no label when the model finds no clear purpose
+        # namer gives no label when the models find no clear purpose
         label = result.get("label") if exit_code == 0 else None
         # Keep names given while the model was running
         if isinstance(label, str) and label and tab.name == previous_name:

@@ -8,23 +8,27 @@
 # default = true
 # ///
 
-# Names things with Apple's on-device model: picks icons to show next to names,
-# such as renamed kitty tabs, and names kitty tabs after the task they are
-# being used for.
+# Names things with on-device models: picks icons to show next to names, such as
+# renamed kitty tabs, and names kitty tabs after the task they are being used
+# for.
 #
-# On macOS 26 and later, the model picks the icon whose meaning best matches a
-# name. Elsewhere, or when the model is unavailable or declines to pick one, the
-# icon is picked from a hash of the name. Either way a name always gets the same
-# icon, as the model's picks are cached, until it is picked anew with --refresh
-# or by naming a tab with that name.
+# On Apple silicon, LiquidAI's d1-2B decision model picks the icon whose meaning
+# best matches a name, and decides whether a tab shows enough of what the user
+# is doing to name it. Apple's on-device Foundation model, on macOS 26 and
+# later, writes the name. Without d1-2B icons are picked from a hash of the
+# name, and without the Foundation model tabs aren't named. Either way a name
+# always gets the same icon, as icons are cached, until it is picked anew with
+# --refresh or by naming a tab with that name.
 #
-# Apple's SDK is built from source and needs Xcode 26 or later, so it is only
-# added to a second run of this script on Macs with it (see run_with_sdk)
-# rather than declared above, where a failing build would stop the script
-# starting. Without it a warning is shown, in yellow when run from a terminal
-# and otherwise as a notification only the first time for each kind of warning,
-# icons are picked from hashes and tabs aren't named. See:
-# https://apple.github.io/python-apple-fm-sdk/
+# The models' libraries are only added to a second run of this script (see
+# run_second) rather than declared above, where a failing install would stop
+# the script starting: d1-2B's on Apple silicon, and when naming a tab also
+# Apple's SDK, which is built from source and needs Xcode 26 or later. Their
+# first install takes a while, and d1-2B (1.35 GB) is downloaded on first use.
+# Without them a warning is shown, in yellow when run from a terminal and
+# otherwise as a notification only the first time for each kind of warning.
+# See: https://apple.github.io/python-apple-fm-sdk/ and
+# https://huggingface.co/LiquidAI/d1-2B-MLX-4bit
 
 import asyncio
 import fcntl
@@ -39,7 +43,6 @@ import tempfile
 import time
 import zlib
 from dataclasses import asdict
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -152,15 +155,35 @@ ICONS = {
     # "bowtie": ("⋈", "joins, SQL, queries, data modelling"),
 }
 
-ICON_INSTRUCTIONS = """\
-Choose an icon to show next to a name, such as the name of a terminal tab, \
-session or project. Choose the icon whose meaning best matches the name, and \
-what it names when that is described. Consider what the name literally says, \
-what kind of work it suggests, and any well-known associations. If nothing \
-fits well, choose the closest in mood or theme.
+# d1-2B's questions, as evaluated in experiments/decision-model-evaluation.
+# The icon is picked from the name alone, so a name gets the same icon however
+# it was given.
+ICON_QUESTION = {
+    "type": "choice",
+    "instructions": "Which icon's meaning best matches this tab name?",
+    "criteria": {icon_id: meaning for icon_id, (_, meaning) in ICONS.items()},
+}
+PURPOSE_QUESTION = {
+    "type": "noul",
+    "instructions": "Has the user done something in this tab that shows what they "
+    "are working on?",
+}
+# P(yes) from which a tab counts as having a purpose, the best threshold on the
+# evaluation's 29 labelled tabs. Each naming records P(yes) to revisit it.
+PURPOSE_THRESHOLD = 0.25
 
-Icons:
-""" + "\n".join(f"{icon_id}: {meaning}" for icon_id, (_, meaning) in ICONS.items())
+# d1-2B's 4-bit MLX build and the mlx-vlm commit that added d1 support (not yet
+# released), as evaluated. About 80 packages; mlx needs Apple silicon.
+D1_REPO = "LiquidAI/d1-2B-MLX-4bit"
+D1_REVISION = "6c4e058323154370baf96fd8d43c670b3a5bc464"
+D1_FILES = ["*.json", "*.jinja", "model.safetensors"]
+D1_DEPENDENCIES = [
+    "mlx==0.32.4",
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm"
+    "@29e033aeecc60deb9f5bc0a140f343d5501b0a03",
+]
+# Bytes of freed buffers MLX keeps for reuse, which otherwise grow past 2 GB
+MLX_CACHE_LIMIT = 2**30
 
 TAB_INSTRUCTIONS = """\
 You name terminal tabs. You are given a snapshot of one tab: its windows, \
@@ -182,26 +205,16 @@ the tab is.
 The title should be 1 to 4 lowercase words separated by spaces, naming the \
 task as the user would name it themselves."""
 
-# Added to TAB_INSTRUCTIONS when the icon is picked in the same request
-TAB_ICON_INSTRUCTIONS = """
-
-Also choose an icon to show next to the title, whose meaning best matches the \
-task. If nothing fits well, choose the closest in mood or theme.
-
-Icons:
-""" + "\n".join(f"{icon_id}: {meaning}" for icon_id, (_, meaning) in ICONS.items())
-
 CACHE_DIR = os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "namer"
 )
 
 CACHE_PATH = os.path.join(CACHE_DIR, "icons.json")
 
-# Changing the icons or instructions invalidates the cache
-CACHE_VERSION = zlib.crc32(json.dumps([ICONS, ICON_INSTRUCTIONS]).encode())
-
-# Cached for names the model declines to pick an icon for
-DECLINED = ""
+# Changing the icons, the question or the model invalidates the cache
+CACHE_VERSION = zlib.crc32(
+    json.dumps([ICONS, ICON_QUESTION, D1_REPO, D1_REVISION]).encode()
+)
 
 # Xcode is required to build the SDK from source
 # https://apple.github.io/python-apple-fm-sdk/
@@ -230,7 +243,12 @@ WARNINGS = {
     ),
     "sdk": (
         "Couldn't install or load Foundation Models SDK for Python. "
-        "Run 'namer icon test' in a terminal to see why."
+        "Run 'namer tab' in a terminal to see why."
+    ),
+    "d1": (
+        "Couldn't install, download or load the d1-2B decision model. Icons are "
+        "picked from hashes until it can be. Run 'namer icon test' in a terminal "
+        "to see why."
     ),
     "model-disabled": (
         "Apple Intelligence not enabled. Turn on in System Settings > "
@@ -238,11 +256,10 @@ WARNINGS = {
     ),
     "model-not-ready": (
         "Apple Intelligence model not ready, it may still be downloading. "
-        "Icons are picked from hashes until it is."
+        "Tabs aren't named until it is."
     ),
     "model-unavailable": (
-        "Apple Intelligence model unavailable. Icons are picked from hashes "
-        "until it is."
+        "Apple Intelligence model unavailable. Tabs aren't named until it is."
     ),
 }
 
@@ -262,38 +279,26 @@ GIT_STATUS_LINES = 20
 GIT_LOG_COMMITS = 8
 
 app = typer.Typer(
-    help="Name things with Apple's on-device model.",
+    help="Name things with on-device models.",
     add_completion=False,
     no_args_is_help=True,
     # Tracebacks would otherwise show tab contexts, in the logs kitty keeps
     pretty_exceptions_show_locals=False,
 )
 
-# Set for the run of this script that has the SDK, see run_with_sdk
-with_sdk = False
+# Set for the run of this script that has the models' libraries, see run_second
+second_run = False
 
-# Exit status of a run with the SDK that failed and printed why
+# Exit status of a second run that failed and printed why
 REPORTED_FAILURE = 3
-
-
-class IconMode(str, Enum):
-    separate = "separate"
-    same = "same"
-    none = "none"
-
-
-ICON_MODE_HELP = (
-    "pick the tab's icon in a request of its own after naming it, in the same "
-    "request, or not at all"
-)
 
 
 @app.callback()
 def main(
-    sdk: Annotated[bool, typer.Option("--with-sdk", hidden=True)] = False,
+    second: Annotated[bool, typer.Option("--second-run", hidden=True)] = False,
 ) -> None:
-    global with_sdk
-    with_sdk = sdk
+    global second_run
+    second_run = second
 
     # kitty may run this without a UTF-8 locale
     sys.stdout.reconfigure(encoding="utf-8")
@@ -310,19 +315,17 @@ def icon(
     ] = False,
 ) -> None:
     """Print an icon for each name, one per line in the same order."""
-    if with_sdk:
-        # The run with the SDK only picks icons, its caller prints them.
-        if (fm := load_model()) is not None:
-            picked = asyncio.run(model_icon_ids(fm, names))
-            if picked:
-                update_cache(picked)
+    if second_run:
+        # The second run only picks icons, its caller prints them.
+        d1 = load_d1()
+        update_cache({name: d1_icon_id(d1, name) for name in dict.fromkeys(names)})
         return
 
     icon_ids = read_cache()
     missing = [name for name in dict.fromkeys(names) if refresh or name not in icon_ids]
 
-    if missing and sdk_buildable():
-        run_with_sdk(["icon", "--", *missing], stdout=subprocess.DEVNULL)
+    if missing and d1_supported():
+        run_second(["icon", "--", *missing], stdout=subprocess.DEVNULL)
         icon_ids = read_cache()
 
     for name in names:
@@ -339,13 +342,10 @@ def tab(
     save_context: Annotated[
         Optional[Path],
         typer.Option(
-            help="Save the context given to the model to this file, "
+            help="Save the context given to the models to this file, "
             "as a fixture for 'namer eval'."
         ),
     ] = None,
-    icon_mode: Annotated[
-        IconMode, typer.Option("--icon", help=ICON_MODE_HELP.capitalize() + ".")
-    ] = IconMode.separate,
 ) -> None:
     """Name a kitty tab after the task it is being used for, printing JSON.
 
@@ -354,20 +354,24 @@ def tab(
     "last_exit_status", "screen"}]}. The state of the Git repositories they
     are in is added to it.
 
-    The label is null when the model finds no clear purpose. The tab's icon is
-    cached for the label, and null if picking it failed.
+    d1-2B decides whether the tab shows what the user is working on
+    (purpose_p, its probability), and only then does the Foundation model name
+    it and d1-2B pick the name's icon, which is cached. The label is null when
+    either model finds no clear purpose.
     """
-    if not with_sdk:
-        if not sdk_buildable():
-            print_error("ModelUnavailable", "Apple's on-device model can't be used")
-        if not run_with_sdk(sys.argv[1:]):
+    if not second_run:
+        if not d1_supported() or not sdk_buildable():
+            print_error("ModelUnavailable", "The on-device models can't be used")
+        if not run_second(sys.argv[1:], sdk=True):
             raise typer.Exit(1)
         return
 
     if (fm := load_model()) is None:
         print_error("ModelUnavailable", "Apple's on-device model is unavailable")
 
-    # Failures here would otherwise be taken for the SDK failing, see run_with_sdk
+    d1 = load_d1_or_warn()
+
+    # Failures here would otherwise be taken for the libraries failing, see run_second
     try:
         with open_text(snapshot) as f:
             context = tab_context(json.load(f))
@@ -377,7 +381,7 @@ def tab(
     if save_context is not None:
         save_context.write_text(context, encoding="utf-8")
 
-    result = asyncio.run(name_tab(fm, context, icon_mode))
+    result = asyncio.run(name_tab(fm, d1, context))
 
     if "error" in result:
         print_error(result["error"], result["message"])
@@ -404,41 +408,52 @@ def evaluate(
     ] = 1,
     temperature: Annotated[
         Optional[float],
-        typer.Option("-t", "--temperature", help="Sampling temperature, 0.0 to 1.0."),
+        typer.Option(
+            "-t",
+            "--temperature",
+            help="The Foundation model's sampling temperature, 0.0 to 1.0.",
+        ),
     ] = None,
-    icon_mode: Annotated[
-        IconMode, typer.Option("--icon", help=ICON_MODE_HELP.capitalize() + ".")
-    ] = IconMode.separate,
+    gate: Annotated[
+        bool,
+        typer.Option(
+            help="Only name tabs d1-2B finds a purpose in, as 'namer tab' does; "
+            "--no-gate names every tab, still reporting d1-2B's answer."
+        ),
+    ] = True,
     as_json: Annotated[
         bool, typer.Option("--json", help="Print one JSON object per run.")
     ] = False,
 ) -> None:
     """Name tabs from saved contexts, reporting tokens and timings, to test
-    how sensibly, reliably and quickly the model names them.
+    how sensibly, reliably and quickly the models name them.
 
     Icons picked here aren't cached.
     """
-    if not with_sdk:
-        if not sdk_buildable() or not run_with_sdk(sys.argv[1:]):
+    if not second_run:
+        if not d1_supported() or not sdk_buildable():
+            raise typer.Exit(1)
+        if not run_second(sys.argv[1:], sdk=True):
             raise typer.Exit(1)
         return
 
     started = time.perf_counter()
     if (fm := load_model()) is None:
         raise typer.Exit(REPORTED_FAILURE)
+    d1 = load_d1_or_warn()
 
     model = fm.SystemLanguageModel()
     budget = model.context_size
 
     if not as_json:
         print(
-            f"startup: {time.perf_counter() - started:.2f}s loading SDK and "
-            f"checking model, context window {budget} tokens\n",
+            f"startup: {time.perf_counter() - started:.2f}s loading the models, "
+            f"Foundation model context window {budget} tokens\n",
             flush=True,
         )
 
     for path in fixtures or ["-"]:
-        # Failures here would otherwise be taken for the SDK failing, see run_with_sdk
+        # Failures here would otherwise be taken for the libraries failing, see run_second
         try:
             with open_text(path) as f:
                 context = f.read()
@@ -446,10 +461,10 @@ def evaluate(
             print(f"Couldn't read {path}: {e}", file=sys.stderr)
             raise typer.Exit(REPORTED_FAILURE)
 
-        tokens = asyncio.run(count_tokens(fm, model, context, icon_mode))
+        tokens = asyncio.run(count_tokens(fm, model, context))
 
         for run in range(1, repeat + 1):
-            result = asyncio.run(name_tab(fm, context, icon_mode, temperature))
+            result = asyncio.run(name_tab(fm, d1, context, temperature, gate))
 
             if as_json:
                 print(
@@ -472,7 +487,7 @@ def evaluate(
 def print_error(error: str, message: str):
     """Print a failure as name_tab.py reads it and exit."""
     print(json.dumps({"error": error, "message": message}))
-    raise typer.Exit(REPORTED_FAILURE if with_sdk else 1)
+    raise typer.Exit(REPORTED_FAILURE if second_run else 1)
 
 
 def open_text(path: str):
@@ -483,6 +498,11 @@ def hashed_icon(name: str) -> str:
     # zlib.crc32 gives a consistent int value that we can index with
     icons = list(ICONS.values())
     return icons[zlib.crc32(name.encode()) % len(icons)][0]
+
+
+def d1_supported() -> bool:
+    """Whether this is a Mac with Apple silicon, which MLX needs."""
+    return sys.platform == "darwin" and platform.machine() == "arm64"
 
 
 def model_supported() -> bool:
@@ -605,35 +625,35 @@ def sdk_buildable() -> bool:
     return True
 
 
-def run_with_sdk(args: list[str], stdout=None) -> bool:
-    """Runs this script again with args and the SDK, which uv builds on first
-    use and caches, returning whether that run succeeded. Its output and
-    errors go wherever ours do, such as the logs name_tab.py keeps, unless
-    stdout is given."""
+def run_second(args: list[str], sdk: bool = False, stdout=None) -> bool:
+    """Runs this script again with args and the models' libraries, d1-2B's and
+    with sdk Apple's, which uv installs on first use and caches, returning
+    whether that run succeeded. Its output and errors go wherever ours do, such
+    as the logs name_tab.py keeps, unless stdout is given."""
     uv = os.environ.get("UV") or shutil.which("uv")
 
     if uv is None:
         return False
 
+    libraries = [
+        arg for dependency in D1_DEPENDENCIES for arg in ("--with", dependency)
+    ]
+    if sdk:
+        libraries += ["--with", SDK]
+    env = {**os.environ, "HF_HUB_DISABLE_TELEMETRY": "1"}
+    if not sys.stderr.isatty():
+        env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"  # kitty's logs, not a terminal
+
     result = subprocess.run(
-        [
-            uv,
-            "run",
-            "--quiet",
-            "--with",
-            SDK,
-            "--script",
-            __file__,
-            "--with-sdk",
-            *args,
-        ],
+        [uv, "run", "--quiet", *libraries, "--script", __file__, "--second-run", *args],
+        env=env,
         stdout=stdout,
         check=False,
     )
 
-    # Fails otherwise if uv can't install the SDK or that run can't load it
+    # Fails otherwise if uv can't install the libraries or that run can't load them
     if result.returncode not in (0, REPORTED_FAILURE):
-        warn("sdk")
+        warn("sdk" if sdk else "d1")
 
     return result.returncode == 0
 
@@ -654,56 +674,52 @@ def load_model():
     return fm
 
 
-def icon_schema(fm):
-    @fm.generable
-    class Choice:
-        icon: str = fm.guide("The chosen icon's id", anyOf=list(ICONS))
+def load_d1():
+    """d1-2B, downloaded on first use into the Hugging Face cache. Errors are
+    left to fail this run."""
+    import mlx.core as mx
+    from huggingface_hub import snapshot_download
+    from mlx_vlm import load
 
-    # apple-fm-sdk 0.2.1 drops the description given to @fm.generable (and the
-    # options given to respond(generating=...)), so the schema is made with its
-    # description here and passed to respond(schema=...) instead.
-    return Choice, Choice.generation_schema(description="An icon")
-
-
-async def pick_icon_id(fm, name: str, description: str | None = None) -> str | None:
-    """The id of the icon the model picks for name, given a description of
-    what it names if there is one. DECLINED if it declines to pick one, and
-    None if it fails for other reasons, such as rate limiting."""
-    choice, schema = icon_schema(fm)
-    prompt = f"Name: {name}"
-
-    if description:
-        prompt += f"\nDescription: {description}"
-
-    # A fresh session per name, so earlier names don't influence later ones
-    session = fm.LanguageModelSession(instructions=ICON_INSTRUCTIONS)
-
+    # Pinned, so once downloaded the cached files are used without asking the Hub
     try:
-        content = await session.respond(prompt, schema=schema)
-        icon_id = choice._from_generated_content(content).icon
-    except (
-        fm.RefusalError,
-        fm.GuardrailViolationError,
-        fm.UnsupportedLanguageOrLocaleError,
-    ):
-        return DECLINED
-    except fm.FoundationModelsError:
+        path = snapshot_download(
+            D1_REPO,
+            revision=D1_REVISION,
+            allow_patterns=D1_FILES,
+            local_files_only=True,
+        )
+    except Exception:  # not downloaded yet, or not all of it
+        path = snapshot_download(D1_REPO, revision=D1_REVISION, allow_patterns=D1_FILES)
+    model, _ = load(path)
+    mx.set_cache_limit(MLX_CACHE_LIMIT)
+    return model
+
+
+def load_d1_or_warn():
+    """d1-2B, or None with a warning if it can't be loaded, so that tabs are
+    named without it: every tab the Foundation model finds a purpose in, and
+    their icons picked from hashes."""
+    try:
+        return load_d1()
+    except Exception as e:  # its download or any of its libraries
+        print(f"Couldn't load d1-2B: {type(e).__name__}: {e}", file=sys.stderr)
+        warn("d1")
         return None
 
-    return icon_id if icon_id in ICONS else None
+
+def ask_d1(d1, state: str, question: dict) -> dict:
+    return d1.system_one(state, {"q": question})["answers"]["q"]
 
 
-async def model_icon_ids(fm, names: list[str]) -> dict[str, str]:
-    """Icon ids picked by the model, DECLINED where it declined to pick one.
-    Names that failed for other reasons are left out so that they are retried
-    next time."""
-    icon_ids = {}
+def d1_icon_id(d1, name: str) -> str:
+    probabilities = ask_d1(d1, f"Tab name: {name}", ICON_QUESTION)["probabilities"]
+    return max(probabilities, key=probabilities.get)
 
-    for name in names:
-        if (icon_id := await pick_icon_id(fm, name)) is not None:
-            icon_ids[name] = icon_id
 
-    return icon_ids
+def d1_purpose(d1, context: str) -> float:
+    """d1-2B's probability that the tab shows what the user is working on."""
+    return float(ask_d1(d1, context, PURPOSE_QUESTION)["noul"])
 
 
 def read_cache() -> dict[str, str]:
@@ -854,10 +870,10 @@ def normalise_label(label: str | None) -> str | None:
     return label if label not in ("", "none", "null") else None
 
 
-def tab_analysis(fm, with_icon: bool):
-    """The class the model's analysis of a tab is generated as, with the
-    tab's icon last if with_icon. Made here as the SDK is only loaded in the
-    run that has it, and subclasses of generable classes lose their fields."""
+def tab_analysis(fm):
+    """The class the Foundation model's analysis of a tab is generated as. Made
+    here as the SDK is only loaded in the run that has it, and subclasses of
+    generable classes lose their fields."""
     # Fields are generated in order, so the label follows the evidence for it.
     # The SDK only treats Optional[str], not str | None, as optional.
     annotations = {
@@ -884,10 +900,6 @@ def tab_analysis(fm, with_icon: bool):
         "label": fm.guide("Short task-oriented title, or none without a clear purpose"),
     }
 
-    if with_icon:
-        annotations["icon"] = str
-        fields["icon"] = fm.guide("The id of the icon for the title", anyOf=list(ICONS))
-
     # The schema is shown to the model with the class name as its title, so the
     # name is a field that title can't be mistaken for, which it was when the
     # field was also called title.
@@ -903,20 +915,37 @@ def tab_analysis(fm, with_icon: bool):
     )
 
 
-def tab_instructions(icon_mode: IconMode) -> str:
-    return TAB_INSTRUCTIONS + (
-        TAB_ICON_INSTRUCTIONS if icon_mode is IconMode.same else ""
-    )
-
-
 async def name_tab(
-    fm, context: str, icon_mode: IconMode, temperature: float | None = None
+    fm, d1, context: str, temperature: float | None = None, gate: bool = True
 ) -> dict:
-    """The model's analysis of a tab, with its label as the tab's name and the
-    icon for it, or the error it raised."""
-    analysis, schema = tab_analysis(fm, icon_mode is IconMode.same)
+    """The tab's name and icon, with the models' reasoning, or the error the
+    Foundation model raised. Without d1-2B (None) every tab is named that the
+    Foundation model finds a purpose in, and the icon is left to `namer icon`."""
+    result = {
+        "purpose_p": None,
+        "purpose_threshold": PURPOSE_THRESHOLD,
+        "purpose_seconds": None,
+        "key_datapoints": None,
+        "has_clear_purpose": None,
+        "description": None,
+        "raw_label": None,
+        "label": None,
+        "icon_id": None,
+        "icon": None,
+        "seconds": None,
+        "icon_seconds": None,
+    }
+
+    if d1 is not None:
+        started = time.perf_counter()
+        result["purpose_p"] = round(d1_purpose(d1, context), 4)
+        result["purpose_seconds"] = round(time.perf_counter() - started, 3)
+        if gate and result["purpose_p"] < PURPOSE_THRESHOLD:
+            return result
+
+    analysis, schema = tab_analysis(fm)
     # A fresh session per run, so earlier runs don't influence later ones
-    session = fm.LanguageModelSession(instructions=tab_instructions(icon_mode))
+    session = fm.LanguageModelSession(instructions=TAB_INSTRUCTIONS)
     options = fm.GenerationOptions(temperature=temperature)
     started = time.perf_counter()
 
@@ -926,47 +955,36 @@ async def name_tab(
     except fm.FoundationModelsError as e:
         return {"error": type(e).__name__, "message": str(e)}
 
-    seconds = time.perf_counter() - started
+    result["seconds"] = round(time.perf_counter() - started, 3)
     label = (
         normalise_label(response["label"]) if response["has_clear_purpose"] else None
     )
-    icon_id = response.get("icon") if label is not None else None
-    icon_seconds = None
+    result.update(
+        key_datapoints=response["key_datapoints"],
+        has_clear_purpose=response["has_clear_purpose"],
+        description=response["description"],
+        raw_label=response["label"],
+        label=label,
+    )
 
-    if label is not None and icon_mode is IconMode.separate:
+    if label is not None and d1 is not None:
         started = time.perf_counter()
-        icon_id = await pick_icon_id(fm, label, response["description"])
-        icon_seconds = time.perf_counter() - started
+        result["icon_id"] = d1_icon_id(d1, label)
+        result["icon"] = ICONS[result["icon_id"]][0]
+        result["icon_seconds"] = round(time.perf_counter() - started, 3)
 
-    if icon_id is None:
-        icon = None
-    else:
-        icon = ICONS[icon_id][0] if icon_id in ICONS else hashed_icon(label)
-
-    return {
-        "key_datapoints": response["key_datapoints"],
-        "has_clear_purpose": response["has_clear_purpose"],
-        "description": response["description"],
-        "raw_label": response["label"],
-        "label": label,
-        "icon_id": icon_id,
-        "icon": icon,
-        "seconds": round(seconds, 3),
-        "icon_seconds": icon_seconds and round(icon_seconds, 3),
-    }
+    return result
 
 
-async def count_tokens(fm, model, context: str, icon_mode: IconMode) -> dict[str, int]:
+async def count_tokens(fm, model, context: str) -> dict[str, int]:
     """Tokens each part of a request to name a tab uses, which together with
-    the response must fit in the model's context window. Empty if counting
-    fails, so that the failure is reported by the run that follows."""
-    _, schema = tab_analysis(fm, icon_mode is IconMode.same)
+    the response must fit in the Foundation model's context window. Empty if
+    counting fails, so that the failure is reported by the run that follows."""
+    _, schema = tab_analysis(fm)
 
     try:
         return {
-            "instructions": await model.token_count(
-                instructions=tab_instructions(icon_mode)
-            ),
+            "instructions": await model.token_count(instructions=TAB_INSTRUCTIONS),
             "schema": await model.token_count(schema),
             "context": await model.token_count(context),
         }
@@ -987,6 +1005,19 @@ def print_report(name: str, run: int, tokens: dict, budget: int, result: dict):
         print(f"\033[31m   {result['error']}: {result['message']}\033[0m")
         return
 
+    if result["purpose_p"] is not None:
+        verdict = (
+            "purpose" if result["purpose_p"] >= PURPOSE_THRESHOLD else "no purpose"
+        )
+        print(
+            f"   d1-2B:       P(yes) {result['purpose_p']:.2f}, {verdict} "
+            f"({result['purpose_seconds']:.2f}s)"
+        )
+
+    if result["seconds"] is None:
+        print("   not named")
+        return
+
     seconds = f"{result['seconds']:.2f}s"
     if result["icon_seconds"] is not None:
         seconds += f", then {result['icon_seconds']:.2f}s picking icon"
@@ -1002,7 +1033,7 @@ def print_report(name: str, run: int, tokens: dict, budget: int, result: dict):
         label += f" (given as {result['raw_label']!r})"
     print(f"   label:       {label}")
     if result["icon_id"] is not None:
-        print(f"   icon:        {result['icon']} {result['icon_id'] or '(declined)'}")
+        print(f"   icon:        {result['icon']} {result['icon_id']}")
 
 
 if __name__ == "__main__":
