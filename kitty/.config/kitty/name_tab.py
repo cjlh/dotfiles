@@ -5,8 +5,8 @@
 # last commands and screen text) is named in the background by the namer script
 # from this repo's scripts package, which adds the state of the Git
 # repositories they are in. A decision model, d1-2B, decides whether it shows
-# what the tab is being used for; only then does Apple's on-device model name
-# it, and d1-2B pick an icon for the name.
+# what the tab is being used for while the model TAB_NAMING_MODE picks names
+# it, and d1-2B then picks an icon for the name.
 #
 # While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
 # place of its icon. It is then renamed with the generated name and icon, unless
@@ -30,7 +30,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from kittens.tui.handler import result_handler
 from kitty.constants import clear_handled_signals
@@ -52,9 +52,16 @@ REPICK_ICON_ATTR = "tab_bar_repick_icon"
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 # Last lines of each window's screen to include
 SCREEN_LINES = 40
-# seconds; its first run on a machine installs the models' libraries and
-# downloads d1-2B (1.35 GB)
+# seconds; its first run on a machine downloads llama.cpp and the models (3 GB),
+# and in "apple_foundation" mode also builds Apple's SDK
 NAMER_TIMEOUT = 600
+
+TabNamingMode = Literal["titlewen_f16", "apple_foundation"]
+
+# The model namer names tabs with: "titlewen_f16" is Titlewen, a small title
+# model run by llama.cpp, "apple_foundation" Apple's on-device Foundation
+# model, which needs macOS 26 and Xcode 26 or later
+TAB_NAMING_MODE: TabNamingMode = "titlewen_f16"
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH,
 # and namer is run by uv
@@ -235,7 +242,14 @@ def handle_result(
 
     try:
         _run_namer(
-            ["tab", "--save-context", context_path, snapshot_path],
+            [
+                "tab",
+                "--model",
+                TAB_NAMING_MODE,
+                "--save-context",
+                context_path,
+                snapshot_path,
+            ],
             output_path,
             log_path,
             done,

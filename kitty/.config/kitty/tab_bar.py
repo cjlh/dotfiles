@@ -62,8 +62,7 @@ LOADED_AT = time.monotonic()
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
-# seconds; its first run on a machine installs the models' libraries and
-# downloads d1-2B (1.35 GB)
+# seconds; its first run on a machine downloads llama.cpp and d1-2B (1.8 GB)
 NAMER_TIMEOUT = 600
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH.

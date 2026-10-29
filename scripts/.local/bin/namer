@@ -14,35 +14,52 @@
 #
 # On Apple silicon, LiquidAI's d1-2B decision model picks the icon whose meaning
 # best matches a name, and decides whether a tab shows enough of what the user
-# is doing to name it. Apple's on-device Foundation model, on macOS 26 and
-# later, writes the name. Without d1-2B icons are picked from a hash of the
-# name, and without the Foundation model tabs aren't named. Either way a name
-# always gets the same icon, as icons are cached, until it is picked anew with
-# --refresh or by naming a tab with that name.
+# is doing to name it. The name is written by the model --model picks:
+# Titlewen, a small title model, or Apple's on-device Foundation model on macOS
+# 26 and later. Without d1-2B icons are picked from a hash of the name, and
+# without the naming model tabs aren't named. Either way a name always gets the
+# same icon, as icons are cached, until it is picked anew with --refresh or by
+# naming a tab with that name.
 #
-# The models' libraries are only added to a second run of this script (see
-# run_second) rather than declared above, where a failing install would stop
-# the script starting: d1-2B's on Apple silicon, and when naming a tab also
-# Apple's SDK, which is built from source and needs Xcode 26 or later. Their
-# first install takes a while, and d1-2B (1.35 GB) is downloaded on first use.
-# Without them a warning is shown, in yellow when run from a terminal and
-# otherwise as a notification only the first time for each kind of warning.
-# See: https://apple.github.io/python-apple-fm-sdk/ and
-# https://huggingface.co/LiquidAI/d1-2B-MLX-4bit
+# d1-2B and Titlewen run in llama.cpp's llama-server, one server per run in its
+# router mode, which serves each model from a process of its own (see
+# LlamaServer). On first use namer downloads a pinned llama.cpp release (16 MB)
+# and the models' GGUF files (d1-2B 1.8 GB, Titlewen 1.2 GB), checking each
+# against its sha256, into its cache directory.
+#
+# Apple's SDK is only added to a second run of this script (see run_second)
+# rather than declared above, where a failing install would stop the script
+# starting. It is built from source, which takes a while and needs Xcode 26 or
+# later. Without a model a warning is shown, in yellow when run from a terminal
+# and otherwise as a notification only the first time for each kind of
+# warning.
+# See: https://github.com/ggml-org/llama.cpp/tree/master/tools/server,
+# https://huggingface.co/LiquidAI/d1-2B-GGUF,
+# https://huggingface.co/efficiencyx/Titlewen-GGUF and
+# https://apple.github.io/python-apple-fm-sdk/
 
 import asyncio
 import fcntl
+import hashlib
 import json
 import os
 import platform
 import re
+import secrets
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import zlib
-from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -168,22 +185,84 @@ PURPOSE_QUESTION = {
     "instructions": "Has the user done something in this tab that shows what they "
     "are working on?",
 }
-# P(yes) from which a tab counts as having a purpose, the best threshold on the
-# evaluation's 29 labelled tabs. Each naming records P(yes) to revisit it.
+# P(yes) from which a tab counts as having a purpose. With the Q8_0 build on
+# llama.cpp, any threshold from 0.25 to 0.42 was right on 21 of the 22 tabs
+# labelled in experiments/decision-model-evaluation. Each naming records P(yes)
+# to revisit it.
 PURPOSE_THRESHOLD = 0.25
 
-# d1-2B's 4-bit MLX build and the mlx-vlm commit that added d1 support (not yet
-# released), as evaluated. About 80 packages; mlx needs Apple silicon.
-D1_REPO = "LiquidAI/d1-2B-MLX-4bit"
-D1_REVISION = "6c4e058323154370baf96fd8d43c670b3a5bc464"
-D1_FILES = ["*.json", "*.jinja", "model.safetensors"]
-D1_DEPENDENCIES = [
-    "mlx==0.32.4",
-    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm"
-    "@29e033aeecc60deb9f5bc0a140f343d5501b0a03",
-]
-# Bytes of freed buffers MLX keeps for reuse, which otherwise grow past 2 GB
-MLX_CACHE_LIMIT = 2**30
+
+@dataclass(frozen=True)
+class Gguf:
+    """A model file on the Hugging Face Hub, pinned to a revision."""
+
+    name: str  # its name in llama-server, which requests give as "model"
+    repo: str
+    revision: str
+    file: str
+    size: int
+    sha256: str
+
+    @property
+    def url(self) -> str:
+        return f"https://huggingface.co/{self.repo}/resolve/{self.revision}/{self.file}"
+
+
+# llama.cpp's first release with d1-2B (ggml-org/llama.cpp#31275), for macOS
+# on Apple silicon. Its llama-server answers d1-2B's questions at /v1/systemone.
+LLAMA_RELEASE = "b11945"
+LLAMA_ARCHIVE_URL = (
+    f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/"
+    f"llama-{LLAMA_RELEASE}-bin-macos-arm64.tar.gz"
+)
+LLAMA_ARCHIVE_SHA256 = "2499be768dfed7302dc596afa5606210769d27d4835eb2b32bf9655409b4b4f1"
+
+D1 = Gguf(
+    "d1",
+    "LiquidAI/d1-2B-GGUF",
+    "63be75e6586882defeb706ed4bda812d90256a6d",
+    "d1-2B-Q8_0.gguf",
+    1_846_240_576,
+    "073313d92b53b0ac8193db6e906cb3c78a98183d244b15b7b8f5426115c6738c",
+)
+TITLEWEN_F16 = Gguf(
+    "titlewen",
+    "efficiencyx/Titlewen-GGUF",
+    "732ed0c78601dfa07387718198b9c6068454319a",
+    "qwen3-0.6b.F16.gguf",
+    1_198_182_976,
+    "0d402cf371be91fa73d18aa9552f6c979eda27ddee4b48e8f9d8d86140663890",
+)
+
+# llama-server's options for every model, then each model's own. d1-2B reads a
+# question in one batch, so the batch holds the longest tab context.
+LLAMA_CONTEXT = 8192  # tokens
+LLAMA_MODEL_OPTIONS = {D1.name: {"b": LLAMA_CONTEXT, "ub": LLAMA_CONTEXT}}
+# seconds; a request waits for its model to load, the first time from a
+# release also for Metal's shaders to compile (about 10s)
+LLAMA_REQUEST_TIMEOUT = 120
+LLAMA_START_TIMEOUT = 30  # seconds for the router to listen
+LLAMA_STOP_TIMEOUT = 10  # seconds before the server is killed
+DOWNLOAD_TIMEOUT = 60  # seconds without data before a download fails
+
+
+class TabNamingMode(str, Enum):
+    """The model that names tabs."""
+
+    titlewen_f16 = "titlewen_f16"
+    apple_foundation = "apple_foundation"
+
+
+# The GGUF of each naming mode run by llama-server
+NAMING_GGUFS = {TabNamingMode.titlewen_f16: TITLEWEN_F16}
+
+# Titlewen's chat template with no system prompt, which it isn't trained with,
+# and the empty thinking block the template adds with thinking turned off
+TITLEWEN_PROMPT = (
+    "<|im_start|>user\n{context}<|im_end|>\n<|im_start|>assistant\n"
+    "<think>\n\n</think>\n\n"
+)
+TITLEWEN_MAX_TOKENS = 24
 
 TAB_INSTRUCTIONS = """\
 You name terminal tabs. You are given a snapshot of one tab: its windows, \
@@ -211,10 +290,15 @@ CACHE_DIR = os.path.join(
 
 CACHE_PATH = os.path.join(CACHE_DIR, "icons.json")
 
-# Changing the icons, the question or the model invalidates the cache
+# Changing the icons, the question, the model or llama.cpp invalidates the cache
 CACHE_VERSION = zlib.crc32(
-    json.dumps([ICONS, ICON_QUESTION, D1_REPO, D1_REVISION]).encode()
+    json.dumps([ICONS, ICON_QUESTION, asdict(D1), LLAMA_RELEASE]).encode()
 )
+
+# llama.cpp's release and the models' files, each in a directory or file named
+# after its version so that a new one is downloaded beside the old
+LLAMA_DIR = os.path.join(CACHE_DIR, "llama.cpp")
+MODELS_DIR = os.path.join(CACHE_DIR, "models")
 
 # Xcode is required to build the SDK from source
 # https://apple.github.io/python-apple-fm-sdk/
@@ -245,10 +329,10 @@ WARNINGS = {
         "Couldn't install or load Foundation Models SDK for Python. "
         "Run 'namer tab' in a terminal to see why."
     ),
-    "d1": (
-        "Couldn't install, download or load the d1-2B decision model. Icons are "
-        "picked from hashes until it can be. Run 'namer icon test' in a terminal "
-        "to see why."
+    "llama": (
+        "Couldn't download or start llama.cpp or its models. Icons are picked "
+        "from hashes, and tabs aren't named with Titlewen, until it can be. Run "
+        "'namer icon test' in a terminal to see why."
     ),
     "model-disabled": (
         "Apple Intelligence not enabled. Turn on in System Settings > "
@@ -315,18 +399,19 @@ def icon(
     ] = False,
 ) -> None:
     """Print an icon for each name, one per line in the same order."""
-    if second_run:
-        # The second run only picks icons, its caller prints them.
-        d1 = load_d1()
-        update_cache({name: d1_icon_id(d1, name) for name in dict.fromkeys(names)})
-        return
-
     icon_ids = read_cache()
     missing = [name for name in dict.fromkeys(names) if refresh or name not in icon_ids]
 
-    if missing and d1_supported():
-        run_second(["icon", "--", *missing], stdout=subprocess.DEVNULL)
-        icon_ids = read_cache()
+    if missing and llama_supported():
+        try:
+            with LlamaServer([D1]) as server:
+                picked = {name: d1_icon_id(server, name) for name in missing}
+        except LlamaError as e:
+            print(f"Couldn't pick icons with d1-2B: {e}", file=sys.stderr)
+            warn("llama")
+        else:
+            update_cache(picked)
+            icon_ids.update(picked)
 
     for name in names:
         icon_id = icon_ids.get(name)
@@ -346,6 +431,9 @@ def tab(
             "as a fixture for 'namer eval'."
         ),
     ] = None,
+    model: Annotated[
+        TabNamingMode, typer.Option(help="The model that names the tab.")
+    ] = TabNamingMode.titlewen_f16,
 ) -> None:
     """Name a kitty tab after the task it is being used for, printing JSON.
 
@@ -355,23 +443,25 @@ def tab(
     are in is added to it.
 
     d1-2B decides whether the tab shows what the user is working on
-    (purpose_p, its probability), and only then does the Foundation model name
-    it and d1-2B pick the name's icon, which is cached. The label is null when
-    either model finds no clear purpose.
+    (purpose_p, its probability) while the naming model names it, and d1-2B
+    then picks the name's icon, which is cached. The label is null when either
+    model finds no clear purpose.
     """
-    if not second_run:
-        if not d1_supported() or not sdk_buildable():
-            print_error("ModelUnavailable", "The on-device models can't be used")
-        if not run_second(sys.argv[1:], sdk=True):
+    if model == TabNamingMode.apple_foundation and not second_run:
+        if not sdk_buildable():
+            print_error("ModelUnavailable", "Apple's on-device model can't be used")
+        if not run_second(sys.argv[1:]):
             raise typer.Exit(1)
         return
 
-    if (fm := load_model()) is None:
+    if not llama_supported():
+        print_error("ModelUnavailable", "llama.cpp's models need Apple silicon")
+
+    fm = None
+    if model == TabNamingMode.apple_foundation and (fm := load_model()) is None:
         print_error("ModelUnavailable", "Apple's on-device model is unavailable")
 
-    d1 = load_d1_or_warn()
-
-    # Failures here would otherwise be taken for the libraries failing, see run_second
+    # Failures here would otherwise be taken for the SDK failing, see run_second
     try:
         with open_text(snapshot) as f:
             context = tab_context(json.load(f))
@@ -381,7 +471,16 @@ def tab(
     if save_context is not None:
         save_context.write_text(context, encoding="utf-8")
 
-    result = asyncio.run(name_tab(fm, d1, context))
+    try:
+        with LlamaServer(llama_models(model)) as server:
+            result = name_tab(model, fm, server, context)
+    except LlamaError as e:
+        print(f"Couldn't use llama.cpp: {e}", file=sys.stderr)
+        warn("llama")
+        if fm is None:
+            print_error("LlamaUnavailable", str(e))
+        # Apple's model names the tab without d1-2B
+        result = name_tab(model, fm, None, context)
 
     if "error" in result:
         print_error(result["error"], result["message"])
@@ -406,12 +505,16 @@ def evaluate(
     repeat: Annotated[
         int, typer.Option("-n", "--repeat", help="Runs per fixture.")
     ] = 1,
+    model: Annotated[
+        TabNamingMode, typer.Option(help="The model that names the tabs.")
+    ] = TabNamingMode.titlewen_f16,
     temperature: Annotated[
         Optional[float],
         typer.Option(
             "-t",
             "--temperature",
-            help="The Foundation model's sampling temperature, 0.0 to 1.0.",
+            help="The naming model's sampling temperature, 0.0 to 1.0. Titlewen "
+            "picks the likeliest words by default, the Foundation model samples.",
         ),
     ] = None,
     gate: Annotated[
@@ -430,58 +533,67 @@ def evaluate(
 
     Icons picked here aren't cached.
     """
-    if not second_run:
-        if not d1_supported() or not sdk_buildable():
+    if model == TabNamingMode.apple_foundation and not second_run:
+        if not sdk_buildable():
             raise typer.Exit(1)
-        if not run_second(sys.argv[1:], sdk=True):
+        if not run_second(sys.argv[1:]):
             raise typer.Exit(1)
         return
 
+    if not llama_supported():
+        print("llama.cpp's models need Apple silicon", file=sys.stderr)
+        raise typer.Exit(REPORTED_FAILURE if second_run else 1)
+
     started = time.perf_counter()
-    if (fm := load_model()) is None:
-        raise typer.Exit(REPORTED_FAILURE)
-    d1 = load_d1_or_warn()
-
-    model = fm.SystemLanguageModel()
-    budget = model.context_size
-
-    if not as_json:
-        print(
-            f"startup: {time.perf_counter() - started:.2f}s loading the models, "
-            f"Foundation model context window {budget} tokens\n",
-            flush=True,
-        )
-
-    for path in fixtures or ["-"]:
-        # Failures here would otherwise be taken for the libraries failing, see run_second
-        try:
-            with open_text(path) as f:
-                context = f.read()
-        except OSError as e:
-            print(f"Couldn't read {path}: {e}", file=sys.stderr)
+    fm = budget = None
+    if model == TabNamingMode.apple_foundation:
+        if (fm := load_model()) is None:
             raise typer.Exit(REPORTED_FAILURE)
+        budget = fm.SystemLanguageModel().context_size
 
-        tokens = asyncio.run(count_tokens(fm, model, context))
-
-        for run in range(1, repeat + 1):
-            result = asyncio.run(name_tab(fm, d1, context, temperature, gate))
-
-            if as_json:
+    try:
+        with LlamaServer(llama_models(model)) as server:
+            if not as_json:
+                window = f", Foundation model context window {budget} tokens" if fm else ""
                 print(
-                    json.dumps(
-                        {
-                            "fixture": path,
-                            "run": run,
-                            "tokens": tokens,
-                            "context_size": budget,
-                            **result,
-                        }
-                    ),
+                    f"startup: {time.perf_counter() - started:.2f}s starting "
+                    f"the models{window}\n",
                     flush=True,
                 )
-            else:
-                print_report(path, run, tokens, budget, result)
-                print(flush=True)
+
+            for path in fixtures or ["-"]:
+                # Failures here would otherwise be taken for the SDK failing, see run_second
+                try:
+                    with open_text(path) as f:
+                        context = f.read()
+                except OSError as e:
+                    print(f"Couldn't read {path}: {e}", file=sys.stderr)
+                    raise typer.Exit(REPORTED_FAILURE)
+
+                tokens = asyncio.run(count_tokens(fm, context)) if fm else {}
+
+                for run in range(1, repeat + 1):
+                    result = name_tab(model, fm, server, context, temperature, gate)
+
+                    if as_json:
+                        print(
+                            json.dumps(
+                                {
+                                    "fixture": path,
+                                    "run": run,
+                                    "tokens": tokens,
+                                    "context_size": budget,
+                                    **result,
+                                }
+                            ),
+                            flush=True,
+                        )
+                    else:
+                        print_report(path, run, tokens, budget, result)
+                        print(flush=True)
+    except LlamaError as e:
+        print(f"Couldn't use llama.cpp: {e}", file=sys.stderr)
+        raise typer.Exit(REPORTED_FAILURE if second_run else 1)
 
 
 def print_error(error: str, message: str):
@@ -500,8 +612,9 @@ def hashed_icon(name: str) -> str:
     return icons[zlib.crc32(name.encode()) % len(icons)][0]
 
 
-def d1_supported() -> bool:
-    """Whether this is a Mac with Apple silicon, which MLX needs."""
+def llama_supported() -> bool:
+    """Whether this is a Mac with Apple silicon, which llama.cpp's release
+    is built for."""
     return sys.platform == "darwin" and platform.machine() == "arm64"
 
 
@@ -625,35 +738,23 @@ def sdk_buildable() -> bool:
     return True
 
 
-def run_second(args: list[str], sdk: bool = False, stdout=None) -> bool:
-    """Runs this script again with args and the models' libraries, d1-2B's and
-    with sdk Apple's, which uv installs on first use and caches, returning
-    whether that run succeeded. Its output and errors go wherever ours do, such
-    as the logs name_tab.py keeps, unless stdout is given."""
+def run_second(args: list[str]) -> bool:
+    """Runs this script again with args and Apple's SDK, which uv builds on
+    first use and caches, returning whether that run succeeded. Its output and
+    errors go wherever ours do, such as the logs name_tab.py keeps."""
     uv = os.environ.get("UV") or shutil.which("uv")
 
     if uv is None:
         return False
 
-    libraries = [
-        arg for dependency in D1_DEPENDENCIES for arg in ("--with", dependency)
-    ]
-    if sdk:
-        libraries += ["--with", SDK]
-    env = {**os.environ, "HF_HUB_DISABLE_TELEMETRY": "1"}
-    if not sys.stderr.isatty():
-        env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"  # kitty's logs, not a terminal
-
     result = subprocess.run(
-        [uv, "run", "--quiet", *libraries, "--script", __file__, "--second-run", *args],
-        env=env,
-        stdout=stdout,
+        [uv, "run", "--quiet", "--with", SDK, "--script", __file__, "--second-run", *args],
         check=False,
     )
 
-    # Fails otherwise if uv can't install the libraries or that run can't load them
+    # Fails otherwise if uv can't install the SDK or that run can't load it
     if result.returncode not in (0, REPORTED_FAILURE):
-        warn("sdk" if sdk else "d1")
+        warn("sdk")
 
     return result.returncode == 0
 
@@ -674,52 +775,325 @@ def load_model():
     return fm
 
 
-def load_d1():
-    """d1-2B, downloaded on first use into the Hugging Face cache. Errors are
-    left to fail this run."""
-    import mlx.core as mx
-    from huggingface_hub import snapshot_download
-    from mlx_vlm import load
+class LlamaError(Exception):
+    """llama.cpp or a model couldn't be downloaded, started or asked."""
 
-    # Pinned, so once downloaded the cached files are used without asking the Hub
+
+def llama_models(mode: TabNamingMode) -> list[Gguf]:
+    """The models llama-server runs to name tabs in a mode."""
+    return [D1, *([NAMING_GGUFS[mode]] if mode in NAMING_GGUFS else [])]
+
+
+def download(url: str, path: str, sha256: str, what: str) -> None:
+    """Downloads url to path unless it is there, checking its sha256. Runs at
+    the same time wait for each other's download rather than repeat it."""
+    if os.path.exists(path):
+        return
+
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+
+    with open(f"{path}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+
+        if os.path.exists(path):
+            return
+
+        if sys.stderr.isatty():
+            print(f"Downloading {what}...", file=sys.stderr)
+
+        fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".download-")
+
+        try:
+            digest = hashlib.sha256()
+
+            with os.fdopen(fd, "wb") as f, urllib.request.urlopen(
+                url, timeout=DOWNLOAD_TIMEOUT
+            ) as response:
+                while chunk := response.read(2**20):
+                    digest.update(chunk)
+                    f.write(chunk)
+
+            if digest.hexdigest() != sha256:
+                raise LlamaError(f"{what} from {url} doesn't match its sha256")
+
+            os.replace(temp_path, path)
+        except OSError as e:
+            raise LlamaError(f"Couldn't download {what} from {url}: {e}") from e
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+
+def llama_server_path() -> str:
+    """llama-server from llama.cpp's release, downloaded on first use."""
+    directory = os.path.join(LLAMA_DIR, LLAMA_RELEASE)
+    server = os.path.join(directory, "llama-server")
+
+    if os.path.exists(server):
+        return server
+
+    archive = f"{directory}.tar.gz"
+    download(LLAMA_ARCHIVE_URL, archive, LLAMA_ARCHIVE_SHA256, f"llama.cpp {LLAMA_RELEASE}")
+
+    with open(f"{directory}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+
+        if not os.path.exists(server):
+            temp_dir = tempfile.mkdtemp(dir=LLAMA_DIR, prefix=".extract-")
+
+            try:
+                with tarfile.open(archive) as tar:
+                    # Refuses members that would land outside temp_dir
+                    tar.extractall(temp_dir, filter="data")
+
+                # The archive holds one directory of llama.cpp's programs and libraries
+                os.replace(os.path.join(temp_dir, f"llama-{LLAMA_RELEASE}"), directory)
+            except (OSError, tarfile.TarError) as e:
+                raise LlamaError(f"Couldn't extract {archive}: {e}") from e
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        if os.path.exists(archive):
+            os.unlink(archive)
+
+    return server
+
+
+def model_path(gguf: Gguf) -> str:
+    """The model's file, downloaded on first use."""
+    path = os.path.join(MODELS_DIR, gguf.repo.replace("/", "--"), gguf.revision, gguf.file)
+    size = f"{gguf.size / 1e9:.1f} GB"
+    download(gguf.url, path, gguf.sha256, f"{gguf.repo} {gguf.file} ({size})")
+    return path
+
+
+def llama_preset(paths: dict[str, str]) -> str:
+    """llama-server's preset for the models at paths, by name, each loaded as
+    the server starts."""
+    lines = ["version = 1", "", "[*]", f"c = {LLAMA_CONTEXT}"]
+
+    for name, path in paths.items():
+        lines += ["", f"[{name}]", f"model = {path}", "load-on-startup = true"]
+        lines += [f"{k} = {v}" for k, v in LLAMA_MODEL_OPTIONS.get(name, {}).items()]
+
+    return "\n".join(lines) + "\n"
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# Runs llama-server until the run of namer that started it exits, even if it is
+# killed: the router has no way to notice, unlike the server it starts for each
+# model, which exits when the router does. Stops it on SIGTERM too. When namer
+# exits first it can't have removed its temporary directory, which is removed
+# here instead.
+WATCHDOG = """\
+import select, shutil, signal, subprocess, sys
+
+parent, timeout, temp_dir, log_path, *args = sys.argv[1:]
+
+with open(log_path, "ab") as log:
+    server = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+
+
+def stop(*_, orphaned=False):
+    server.terminate()
     try:
-        path = snapshot_download(
-            D1_REPO,
-            revision=D1_REVISION,
-            allow_patterns=D1_FILES,
-            local_files_only=True,
+        server.wait(int(timeout))
+    except subprocess.TimeoutExpired:
+        server.kill()
+        server.wait()
+    if orphaned:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, stop)
+queue = select.kqueue()
+exits = [
+    select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD, select.KQ_NOTE_EXIT)
+    for pid in (int(parent), server.pid)
+]
+
+try:
+    queue.control(exits, 0)
+except ProcessLookupError:  # either has already exited
+    stop(orphaned=True)
+
+while True:
+    for event in queue.control(None, 1):
+        if event.ident == server.pid:
+            sys.exit(server.wait())
+        stop(orphaned=True)
+"""
+
+
+class LlamaServer:
+    """llama-server in router mode running models for the length of a with
+    block, listening on a free local port with a key of its own. Each model is
+    loaded as it starts, in a server process of its own, and a request for a
+    model waits until it is loaded."""
+
+    def __init__(self, models: list[Gguf]) -> None:
+        self.models = models
+
+    def __enter__(self) -> "LlamaServer":
+        server = llama_server_path()
+        paths = {gguf.name: model_path(gguf) for gguf in self.models}
+
+        # Only readable by the user, as is the key in it
+        self.temp_dir = tempfile.mkdtemp(prefix="namer-llama-")
+        self.log_path = os.path.join(self.temp_dir, "llama-server.log")
+        preset_path = os.path.join(self.temp_dir, "models.ini")
+        key_path = os.path.join(self.temp_dir, "key")
+        # The router otherwise also lists, and measures, models in llama.cpp's cache
+        cache_dir = os.path.join(self.temp_dir, "cache")
+        os.makedirs(cache_dir)
+
+        with open(preset_path, "w") as f:
+            f.write(llama_preset(paths))
+
+        self.key = secrets.token_hex(16)
+
+        with open(key_path, "w") as f:
+            f.write(self.key + "\n")
+
+        self.port = free_port()
+        args = [
+            server,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self.port),
+            "--api-key-file",
+            key_path,
+            "--no-webui",
+            "--models-preset",
+            preset_path,
+        ]
+        self.watchdog = subprocess.Popen(
+            [sys.executable, "-I", "-c", WATCHDOG, str(os.getpid()),
+             str(LLAMA_STOP_TIMEOUT), self.temp_dir, self.log_path, *args],
+            env={**os.environ, "LLAMA_CACHE": cache_dir},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-    except Exception:  # not downloaded yet, or not all of it
-        path = snapshot_download(D1_REPO, revision=D1_REVISION, allow_patterns=D1_FILES)
-    model, _ = load(path)
-    mx.set_cache_limit(MLX_CACHE_LIMIT)
-    return model
+
+        try:
+            self.wait_until_listening()
+        except BaseException:
+            self.__exit__()
+            raise
+
+        return self
+
+    def __exit__(self, *_) -> None:
+        if self.watchdog.poll() is None:
+            self.watchdog.send_signal(signal.SIGTERM)
+
+            try:
+                self.watchdog.wait(LLAMA_STOP_TIMEOUT + 5)
+            except subprocess.TimeoutExpired:
+                self.watchdog.kill()
+                self.watchdog.wait()
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def wait_until_listening(self) -> None:
+        deadline = time.monotonic() + LLAMA_START_TIMEOUT
+
+        while time.monotonic() < deadline:
+            if self.watchdog.poll() is not None:
+                raise LlamaError(f"llama-server exited{self.log_tail()}")
+
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{self.port}/health", timeout=1
+                ) as response:
+                    if response.status == 200:
+                        return
+            except OSError:
+                pass
+
+            time.sleep(0.02)
+
+        raise LlamaError(f"llama-server didn't start listening{self.log_tail()}")
+
+    def post(self, path: str, body: dict) -> dict:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            json.dumps(body).encode(),
+            {"Content-Type": "application/json", "Authorization": f"Bearer {self.key}"},
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=LLAMA_REQUEST_TIMEOUT) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            raise LlamaError(
+                f"{path} failed with {e.code}: {e.read()[:500]!r}{self.log_tail()}"
+            ) from e
+        except (OSError, ValueError) as e:
+            raise LlamaError(f"{path} failed: {e}{self.log_tail()}") from e
+
+    def log_tail(self, lines: int = 20) -> str:
+        try:
+            with open(self.log_path, errors="replace") as f:
+                tail = f.read().splitlines()[-lines:]
+        except OSError:
+            return ""
+
+        return "".join(f"\n  {line}" for line in tail)
 
 
-def load_d1_or_warn():
-    """d1-2B, or None with a warning if it can't be loaded, so that tabs are
-    named without it: every tab the Foundation model finds a purpose in, and
-    their icons picked from hashes."""
+def ask_d1(server: LlamaServer, state: str, question: dict) -> dict:
+    response = server.post(
+        "/v1/systemone", {"model": D1.name, "state": state, "questions": {"q": question}}
+    )
+
     try:
-        return load_d1()
-    except Exception as e:  # its download or any of its libraries
-        print(f"Couldn't load d1-2B: {type(e).__name__}: {e}", file=sys.stderr)
-        warn("d1")
-        return None
+        return response["answers"]["q"]
+    except (KeyError, TypeError) as e:
+        raise LlamaError(f"d1-2B gave no answer: {response!r:.500}") from e
 
 
-def ask_d1(d1, state: str, question: dict) -> dict:
-    return d1.system_one(state, {"q": question})["answers"]["q"]
-
-
-def d1_icon_id(d1, name: str) -> str:
-    probabilities = ask_d1(d1, f"Tab name: {name}", ICON_QUESTION)["probabilities"]
+def d1_icon_id(server: LlamaServer, name: str) -> str:
+    probabilities = ask_d1(server, f"Tab name: {name}", ICON_QUESTION)["probabilities"]
     return max(probabilities, key=probabilities.get)
 
 
-def d1_purpose(d1, context: str) -> float:
+def d1_purpose(server: LlamaServer, context: str) -> float:
     """d1-2B's probability that the tab shows what the user is working on."""
-    return float(ask_d1(d1, context, PURPOSE_QUESTION)["noul"])
+    return float(ask_d1(server, context, PURPOSE_QUESTION)["noul"])
+
+
+def titlewen_title(
+    server: LlamaServer, gguf: Gguf, context: str, temperature: float | None
+) -> str:
+    """Titlewen's title for the context, its likeliest unless a temperature
+    is given."""
+    response = server.post(
+        "/v1/completions",
+        {
+            "model": gguf.name,
+            "prompt": TITLEWEN_PROMPT.format(context=context),
+            "max_tokens": TITLEWEN_MAX_TOKENS,
+            "temperature": temperature or 0.0,
+            "stop": ["<|im_end|>", "<|im_start|>"],
+        },
+    )
+
+    try:
+        text = response["choices"][0]["text"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise LlamaError(f"Titlewen gave no title: {response!r:.500}") from e
+
+    return (text.strip().splitlines() or [""])[0]
 
 
 def read_cache() -> dict[str, str]:
@@ -915,13 +1289,38 @@ def tab_analysis(fm):
     )
 
 
-async def name_tab(
-    fm, d1, context: str, temperature: float | None = None, gate: bool = True
+async def foundation_analysis(fm, context: str, temperature: float | None) -> dict:
+    """The Foundation model's analysis of the tab, see tab_analysis."""
+    analysis, schema = tab_analysis(fm)
+    # A fresh session per run, so earlier runs don't influence later ones
+    session = fm.LanguageModelSession(instructions=TAB_INSTRUCTIONS)
+    options = fm.GenerationOptions(temperature=temperature)
+    content = await session.respond(context, schema=schema, options=options)
+    return asdict(analysis._from_generated_content(content))
+
+
+def timed(function, *args):
+    """function(*args) and the seconds it took."""
+    started = time.perf_counter()
+    value = function(*args)
+    return value, round(time.perf_counter() - started, 3)
+
+
+def name_tab(
+    mode: TabNamingMode,
+    fm,
+    server: LlamaServer | None,
+    context: str,
+    temperature: float | None = None,
+    gate: bool = True,
 ) -> dict:
     """The tab's name and icon, with the models' reasoning, or the error the
-    Foundation model raised. Without d1-2B (None) every tab is named that the
-    Foundation model finds a purpose in, and the icon is left to `namer icon`."""
+    Foundation model raised. d1-2B decides whether the tab has a purpose while
+    the naming model names it, so that a tab with one is named sooner. Without
+    the server (None), only in the Foundation model's mode, every tab is named
+    that it finds a purpose in, and the icon is left to `namer icon`."""
     result = {
+        "model": mode.value,
         "purpose_p": None,
         "purpose_threshold": PURPOSE_THRESHOLD,
         "purpose_seconds": None,
@@ -936,51 +1335,57 @@ async def name_tab(
         "icon_seconds": None,
     }
 
-    if d1 is not None:
-        started = time.perf_counter()
-        result["purpose_p"] = round(d1_purpose(d1, context), 4)
-        result["purpose_seconds"] = round(time.perf_counter() - started, 3)
-        if gate and result["purpose_p"] < PURPOSE_THRESHOLD:
-            return result
+    with ThreadPoolExecutor(1) as pool:
+        purpose = pool.submit(timed, d1_purpose, server, context) if server else None
 
-    analysis, schema = tab_analysis(fm)
-    # A fresh session per run, so earlier runs don't influence later ones
-    session = fm.LanguageModelSession(instructions=TAB_INSTRUCTIONS)
-    options = fm.GenerationOptions(temperature=temperature)
-    started = time.perf_counter()
+        if mode == TabNamingMode.apple_foundation:
+            try:
+                response, seconds = timed(
+                    asyncio.run, foundation_analysis(fm, context, temperature)
+                )
+            except fm.FoundationModelsError as e:
+                return {"error": type(e).__name__, "message": str(e)}
 
-    try:
-        content = await session.respond(context, schema=schema, options=options)
-        response = asdict(analysis._from_generated_content(content))
-    except fm.FoundationModelsError as e:
-        return {"error": type(e).__name__, "message": str(e)}
+            raw_label = response["label"]
+            has_purpose = response["has_clear_purpose"]
+            result.update(
+                key_datapoints=response["key_datapoints"],
+                has_clear_purpose=has_purpose,
+                description=response["description"],
+            )
+        else:
+            raw_label, seconds = timed(
+                titlewen_title, server, NAMING_GGUFS[mode], context, temperature
+            )
+            has_purpose = True  # Titlewen names every tab, d1-2B decides
 
-    result["seconds"] = round(time.perf_counter() - started, 3)
-    label = (
-        normalise_label(response["label"]) if response["has_clear_purpose"] else None
-    )
+        if purpose is not None:
+            purpose_p, result["purpose_seconds"] = purpose.result()
+            result["purpose_p"] = round(purpose_p, 4)
+            if gate and purpose_p < PURPOSE_THRESHOLD:
+                has_purpose = False
+
     result.update(
-        key_datapoints=response["key_datapoints"],
-        has_clear_purpose=response["has_clear_purpose"],
-        description=response["description"],
-        raw_label=response["label"],
-        label=label,
+        raw_label=raw_label,
+        label=normalise_label(raw_label) if has_purpose else None,
+        seconds=seconds,
     )
 
-    if label is not None and d1 is not None:
-        started = time.perf_counter()
-        result["icon_id"] = d1_icon_id(d1, label)
+    if result["label"] is not None and server is not None:
+        result["icon_id"], result["icon_seconds"] = timed(
+            d1_icon_id, server, result["label"]
+        )
         result["icon"] = ICONS[result["icon_id"]][0]
-        result["icon_seconds"] = round(time.perf_counter() - started, 3)
 
     return result
 
 
-async def count_tokens(fm, model, context: str) -> dict[str, int]:
+async def count_tokens(fm, context: str) -> dict[str, int]:
     """Tokens each part of a request to name a tab uses, which together with
     the response must fit in the Foundation model's context window. Empty if
     counting fails, so that the failure is reported by the run that follows."""
     _, schema = tab_analysis(fm)
+    model = fm.SystemLanguageModel()
 
     try:
         return {
@@ -993,13 +1398,15 @@ async def count_tokens(fm, model, context: str) -> dict[str, int]:
         return {}
 
 
-def print_report(name: str, run: int, tokens: dict, budget: int, result: dict):
-    used = sum(tokens.values())
+def print_report(
+    name: str, run: int, tokens: dict, budget: int | None, result: dict
+) -> None:
     print(f"== {name} (run {run})")
-    print(
-        f"   tokens: {used}/{budget} before response "
-        f"({', '.join(f'{part} {count}' for part, count in tokens.items())})"
-    )
+    if tokens:
+        print(
+            f"   tokens: {sum(tokens.values())}/{budget} before response "
+            f"({', '.join(f'{part} {count}' for part, count in tokens.items())})"
+        )
 
     if "error" in result:
         print(f"\033[31m   {result['error']}: {result['message']}\033[0m")
@@ -1014,11 +1421,7 @@ def print_report(name: str, run: int, tokens: dict, budget: int, result: dict):
             f"({result['purpose_seconds']:.2f}s)"
         )
 
-    if result["seconds"] is None:
-        print("   not named")
-        return
-
-    seconds = f"{result['seconds']:.2f}s"
+    seconds = f"{result['seconds']:.2f}s naming"
     if result["icon_seconds"] is not None:
         seconds += f", then {result['icon_seconds']:.2f}s picking icon"
     print(f"   time:        {seconds}")
@@ -1026,8 +1429,14 @@ def print_report(name: str, run: int, tokens: dict, budget: int, result: dict):
     for datapoint in result["key_datapoints"] or []:
         print(f"   - {datapoint}")
 
-    print(f"   purpose:     {result['has_clear_purpose']}")
-    print(f"   description: {result['description']}")
+    if result["has_clear_purpose"] is not None:
+        print(f"   purpose:     {result['has_clear_purpose']}")
+        print(f"   description: {result['description']}")
+
+    if result["label"] is None:
+        print(f"   not named (given {result['raw_label']!r})")
+        return
+
     label = f"\033[1m{result['label']}\033[0m"
     if result["raw_label"] != result["label"]:
         label += f" (given as {result['raw_label']!r})"
