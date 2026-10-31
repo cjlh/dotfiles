@@ -22,11 +22,41 @@
           )
 ]]
 
+-- Returns a Conform format callback which reports how many of the original lines were changed
+local function report_format_changes(bufnr)
+    bufnr = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
+
+    local before = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n') .. '\n'
+    local total = vim.api.nvim_buf_line_count(bufnr)
+
+    return function(err, did_edit)
+        if err then
+            return
+        end
+
+        local after = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n') .. '\n'
+        local hunks = did_edit and vim.text.diff(before, after, { result_type = 'indices' }) or {}
+        local affected = 0
+
+        for _, hunk in ipairs(hunks) do
+            -- Pure insertions touch no original lines, so count them against the line they follow
+            affected = affected + math.max(hunk[2], 1)
+        end
+
+        local msg = affected == 0 and 'No lines reformatted' or string.format('%d lines reformatted', affected, total)
+
+        -- Scheduled so it shows after the "written" message rather than being overwritten by it
+        vim.schedule(function()
+            vim.notify(msg)
+        end)
+    end
+end
+
 require('conform').setup {
-    format_on_save = {
-        timeout_ms = 500,
-        lsp_format = 'fallback',
-    },
+    -- Returning a callback alongside the options is supported but undocumented
+    format_on_save = function(bufnr)
+        return { timeout_ms = 500, lsp_format = 'fallback' }, report_format_changes(bufnr)
+    end,
     formatters_by_ft = {
         lua = { 'stylua' },
         python = { 'ruff_fix', 'ruff_format' },
@@ -115,5 +145,5 @@ vim.keymap.set('n', 'K', function()
 end, { desc = 'Hover documentation (LSP)' })
 
 vim.keymap.set('n', '<leader>F', function()
-    require('conform').format()
+    require('conform').format(nil, report_format_changes(0))
 end, { desc = 'Format and apply autofixes (Conform)' })
