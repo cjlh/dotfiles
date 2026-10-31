@@ -1,7 +1,7 @@
 require('mason').setup()
 
 require('mason-lspconfig').setup {
-    ensure_installed = { 'basedpyright', 'ruff', 'lua_ls' },
+    ensure_installed = { 'basedpyright', 'pyrefly', 'ruff', 'lua_ls' },
     automatic_enable = false,
 }
 

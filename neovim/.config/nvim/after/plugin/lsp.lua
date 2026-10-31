@@ -107,24 +107,86 @@ vim.lsp.config('ruff', {
     -- },
 })
 
+local python_root_markers = {
+    'pyproject.toml',
+    'pyrightconfig.json',
+    'pyrefly.toml',
+    'setup.py',
+    'setup.cfg',
+    'requirements.txt',
+    'Pipfile',
+    '.git',
+}
+
+-- Use Pyrefly for Python projects by default, but use basedpyright if configured for a project
+local function uses_basedpyright(root)
+    if vim.uv.fs_stat(root .. '/pyrightconfig.json') then
+        return true
+    end
+
+    local ok, lines = pcall(vim.fn.readfile, root .. '/pyproject.toml')
+
+    if not ok then
+        return false
+    end
+
+    local text = table.concat(lines, '\n')
+
+    return text:find '%[tool%.basedpyright%]' ~= nil
+        or text:find '%[tool%.pyright%]' ~= nil
+        -- Listed as a dependency
+        or text:find '["\']basedpyright' ~= nil
+end
+
+-- Use project venv's language server where installed, and Mason's otherwise
+local function project_cmd(bin, args)
+    return function(dispatchers, config)
+        local project_bin = config.root_dir and config.root_dir .. '/.venv/bin/' .. bin
+
+        if not (project_bin and vim.fn.executable(project_bin) == 1) then
+            project_bin = bin
+        end
+
+        return vim.lsp.rpc.start(vim.list_extend({ project_bin }, args), dispatchers, { cwd = config.root_dir })
+    end
+end
+
 vim.lsp.config('basedpyright', {
+    cmd = project_cmd('basedpyright-langserver', { '--stdio' }),
+    root_dir = function(bufnr, on_dir)
+        local root = vim.fs.root(bufnr, python_root_markers)
+        if root and uses_basedpyright(root) then
+            on_dir(root)
+        end
+    end,
     settings = {
-        pyright = {
+        basedpyright = {
             -- Using Ruff's import organizer
             disableOrganizeImports = true,
         },
+    },
+})
+
+vim.lsp.config('pyrefly', {
+    cmd = project_cmd('pyrefly', { 'lsp' }),
+    root_dir = function(bufnr, on_dir)
+        local root = vim.fs.root(bufnr, python_root_markers)
+        if not (root and uses_basedpyright(root)) then
+            -- Use buffer's parent directory for standalone scripts
+            on_dir(root or vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)))
+        end
+    end,
+    settings = {
         python = {
-            analysis = {
-                -- Ignore all files for analysis to exclusively use Ruff for linting
-                ignore = { '*' },
+            pyrefly = {
+                -- Default is 'auto', which enables only basic checking when pyrefly config file is not present
+                typeCheckingMode = 'default',
             },
         },
     },
 })
 
-vim.lsp.enable 'ruff'
-vim.lsp.enable 'basedpyright'
-vim.lsp.enable 'lua_ls'
+vim.lsp.enable { 'ruff', 'basedpyright', 'pyrefly', 'lua_ls' }
 
 -- Provided by Xcode/Swift toolchain rather than Mason, so only enable where installed
 if vim.fn.executable 'sourcekit-lsp' == 1 then
@@ -133,7 +195,9 @@ if vim.fn.executable 'sourcekit-lsp' == 1 then
 end
 
 vim.diagnostic.config {
-    virtual_text = true,
+    -- Hide hints (e.g. type checkers' "unused" hints which duplicate Ruff) from inline text,
+    -- they're still shown by fading the code and in the diagnostic float
+    virtual_text = { severity = { min = vim.diagnostic.severity.INFO } },
     virtual_lines = false,
 }
 
