@@ -21,6 +21,7 @@ gitsigns.setup {
     current_line_blame_formatter = '<abbrev_sha> <author>, <author_time:%R> - <summary>',
     current_line_blame_opts = {
         use_focus = false,
+        delay = vim.o.updatetime,
     },
 }
 

@@ -16,7 +16,7 @@ require('snacks').setup {
     image = {},
     scroll = {},
     words = {
-        debounce = 50,
+        debounce = vim.o.updatetime,
     },
     terminal = {
         win = {
