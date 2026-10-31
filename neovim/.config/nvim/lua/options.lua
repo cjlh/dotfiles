@@ -44,7 +44,6 @@ vim.opt.termguicolors = true
 
 vim.opt.completeopt = { 'menu', 'menuone', 'noselect' }
 vim.opt.wildmenu = true
-vim.opt.wildmode = 'longest:full,full'
 vim.opt.wildignore:append '.DS_Store'
 
 -- Enable @ characters in filenames

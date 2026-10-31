@@ -20,14 +20,9 @@
       "rev": "bb639d4bf385a4d89f478b83af4d770be05ab7eb",
       "src": "https://github.com/mason-org/mason.nvim"
     },
-    "mini.completion": {
-      "rev": "7c5edfc0e479dd4edd898cc9ddd1920d8c1ce420",
-      "src": "https://github.com/nvim-mini/mini.completion",
-      "version": "'stable'"
-    },
-    "mini.snippets": {
-      "rev": "b4065ca6b33e4df2897672d3bb760cfc93f4390a",
-      "src": "https://github.com/nvim-mini/mini.snippets",
+    "mini.nvim": {
+      "rev": "1345d191bb3da9c7b0e977f4387c5761f9bff68d",
+      "src": "https://github.com/nvim-mini/mini.nvim",
       "version": "'stable'"
     },
     "nvim-lspconfig": {
@@ -74,10 +69,6 @@
     "which-key.nvim": {
       "rev": "3aab2147e74890957785941f0c1ad87d0a44c15a",
       "src": "https://github.com/folke/which-key.nvim"
-    },
-    "wilder.nvim": {
-      "rev": "679f348dc90d80ff9ba0e7c470c40a4d038dcecf",
-      "src": "https://github.com/gelguy/wilder.nvim"
     }
   }
 }

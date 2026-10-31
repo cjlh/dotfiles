@@ -35,8 +35,7 @@ vim.pack.add {
 
 -- Mini
 vim.pack.add {
-    { src = 'https://github.com/nvim-mini/mini.snippets', version = 'stable' },
-    { src = 'https://github.com/nvim-mini/mini.completion', version = 'stable' },
+    { src = 'https://github.com/nvim-mini/mini.nvim', version = 'stable' },
 }
 
 -- Language support
@@ -53,11 +52,6 @@ vim.pack.add {
     -- 'https://github.com/AlexvZyl/nordic.nvim',
     -- 'https://github.com/Mofiqul/vscode.nvim',
     'https://github.com/vague-theme/vague.nvim',
-}
-
--- File management
-vim.pack.add {
-    'https://github.com/gelguy/wilder.nvim',
 }
 
 -- Git

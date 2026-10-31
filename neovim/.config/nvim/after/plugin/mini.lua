@@ -4,6 +4,8 @@ require('mini.completion').setup {}
 
 require('mini.snippets').setup {}
 
+require('mini.cmdline').setup {}
+
 vim.api.nvim_create_autocmd('FileType', {
     pattern = 'snacks_picker_input',
     desc = 'Disable mini.completion for snacks picker',
