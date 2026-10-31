@@ -57,13 +57,11 @@ vim.pack.add {
 
 -- File management
 vim.pack.add {
-    -- { src = 'https://github.com/ThePrimeagen/harpoon', version = 'harpoon2' },
     'https://github.com/gelguy/wilder.nvim',
 }
 
 -- Git
 vim.pack.add {
-    -- 'https://github.com/airblade/vim-gitgutter',
     'https://github.com/tpope/vim-fugitive',
     'https://github.com/sindrets/diffview.nvim',
     'https://github.com/lewis6991/gitsigns.nvim',
