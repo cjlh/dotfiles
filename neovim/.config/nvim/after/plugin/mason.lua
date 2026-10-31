@@ -9,7 +9,7 @@ require('mason-lspconfig').setup {
 -- Install formatters via registry as they're not supported by `ensure_installed`
 local registry = require 'mason-registry'
 registry.refresh(function()
-    for _, name in ipairs { 'stylua', 'prettier' } do
+    for _, name in ipairs { 'stylua', 'prettier', 'taplo' } do
         local ok, pkg = pcall(registry.get_package, name)
         if ok and not pkg:is_installed() then
             pkg:install()

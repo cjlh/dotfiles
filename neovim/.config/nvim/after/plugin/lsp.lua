@@ -34,6 +34,7 @@ require('conform').setup {
         ['markdown.mdx'] = { 'prettier' },
         json = { 'prettier' },
         jsonc = { 'prettier' },
+        toml = { 'taplo' },
     },
     formatters = {
         prettier = {
