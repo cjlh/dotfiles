@@ -1,3 +1,5 @@
+-- To remove a plugin, delete its spec below, restart, then run `:packdel ++all`
+
 -- Post-install hook equivalent
 vim.api.nvim_create_autocmd('PackChanged', {
     callback = function(ev)
