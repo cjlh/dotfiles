@@ -18,6 +18,10 @@ gitsigns.setup {
     --     untracked = { text = '┆' },
     -- },
     attach_to_untracked = true,
+    current_line_blame_formatter = '<abbrev_sha> <author>, <author_time:%R> - <summary>',
+    current_line_blame_opts = {
+        use_focus = false,
+    },
 }
 
 vim.keymap.set('n', '<leader>Ga', gitsigns.stage_buffer)
