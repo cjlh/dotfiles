@@ -1,9 +1,17 @@
 -- https://github.com/nvim-mini/mini.nvim/blob/e7538b549361c9ac8416a07b0223ce03c508bfe7/readmes/mini-completion.md
 
+-- LSP completion (built-in completion is opt-in and left disabled)
 require('mini.completion').setup {}
 
-require('mini.snippets').setup {}
+-- Only used for LSP snippets currently
+require('mini.snippets').setup {
+    mappings = {
+        jump_next = '<Tab>',
+        jump_prev = '<S-Tab>',
+    },
+}
 
+-- Completion and autocorrect in command line
 require('mini.cmdline').setup {}
 
 vim.api.nvim_create_autocmd('FileType', {

@@ -137,7 +137,6 @@ vim.diagnostic.config {
     virtual_lines = false,
 }
 
-vim.lsp.completion.enable()
 vim.lsp.inlay_hint.enable(true)
 
 vim.keymap.set('n', 'K', function()

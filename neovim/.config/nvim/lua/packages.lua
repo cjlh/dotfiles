@@ -12,25 +12,12 @@ vim.api.nvim_create_autocmd('PackChanged', {
             end
             vim.cmd 'TSUpdate'
         end
-
-        if name == 'telescope-fzf-native.nvim' then
-            local path = vim.fn.stdpath 'data' .. '/site/pack/core/opt/' .. name
-            vim.system({ 'make' }, { cwd = path })
-        end
     end,
 })
 
 -- Show keymap
 vim.pack.add {
     'https://github.com/folke/which-key.nvim',
-}
-
--- Telescope
-vim.pack.add {
-    'https://github.com/nvim-lua/plenary.nvim',
-    'https://github.com/nvim-telescope/telescope.nvim',
-    'https://github.com/nvim-telescope/telescope-fzf-native.nvim',
-    'https://github.com/debugloop/telescope-undo.nvim',
 }
 
 -- Mini

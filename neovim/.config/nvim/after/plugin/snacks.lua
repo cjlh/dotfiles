@@ -87,7 +87,11 @@ vim.keymap.set('n', '<C-space>', function()
     Snacks.picker.grep()
 end, { desc = 'Open file search (Snacks)' })
 
-local recent_exclude_paths = (function()
+vim.keymap.set('n', '<leader>u', function()
+    Snacks.picker.undo()
+end, { desc = 'Undo history (Snacks)' })
+
+local function recent_exclude_paths()
     local cwd = vim.uv.cwd()
     local excludes = {}
 
@@ -96,14 +100,14 @@ local recent_exclude_paths = (function()
     end
 
     return excludes
-end)()
+end
 
 vim.keymap.set('n', '<leader>rf', function()
     Snacks.picker.recent {
         limit = 50, -- Limit applies pre-filter
         filter = {
             cwd = true,
-            paths = recent_exclude_paths,
+            paths = recent_exclude_paths(),
             -- Filter out entries which aren't readable files
             filter = function(item)
                 local file = item.file
