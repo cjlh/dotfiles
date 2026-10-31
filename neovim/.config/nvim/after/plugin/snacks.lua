@@ -88,7 +88,7 @@ vim.keymap.set('n', '<C-space>', function()
 end, { desc = 'Open file search (Snacks)' })
 
 local recent_exclude_paths = (function()
-    local cwd = vim.loop.cwd()
+    local cwd = vim.uv.cwd()
     local excludes = {}
 
     for _, p in ipairs(exclude_dirs) do

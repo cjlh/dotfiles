@@ -25,19 +25,26 @@ gitsigns.setup {
     },
 }
 
-vim.keymap.set('n', '<leader>Ga', gitsigns.stage_buffer)
-vim.keymap.set('n', '<leader>Gr', gitsigns.reset_buffer)
+vim.keymap.set(
+    'n',
+    '<leader>Gb',
+    gitsigns.toggle_current_line_blame,
+    { desc = 'Toggle git blame annotations (gitsigns)' }
+)
+vim.keymap.set('n', '<leader>GB', gitsigns.blame, { desc = 'Open git blame sidebar (gitsigns)' })
 
-vim.keymap.set('n', '<leader>Gp', gitsigns.preview_hunk)
-vim.keymap.set('n', '<leader>Gb', gitsigns.toggle_current_line_blame)
+vim.keymap.set('n', '<leader>Gp', gitsigns.preview_hunk, { desc = 'Preview current hunk (gitsigns)' })
 
-vim.keymap.set('n', '<leader>Gh', gitsigns.stage_hunk)
-vim.keymap.set('n', '<leader>GH', gitsigns.reset_hunk)
+vim.keymap.set('n', '<leader>Gh', gitsigns.stage_hunk, { desc = 'Stage current hunk (gitsigns)' })
+vim.keymap.set('n', '<leader>GH', gitsigns.reset_hunk, { desc = 'Reset current hunk (gitsigns)' })
 
 vim.keymap.set('v', '<leader>Gh', function()
     gitsigns.stage_hunk { vim.fn.line '.', vim.fn.line 'v' }
-end)
+end, { desc = 'Stage selected hunks (gitsigns)' })
 
 vim.keymap.set('v', '<leader>GH', function()
     gitsigns.reset_hunk { vim.fn.line '.', vim.fn.line 'v' }
-end)
+end, { desc = 'Unstage selected hunks (gitsigns)' })
+
+vim.keymap.set('n', '<leader>Ga', gitsigns.stage_buffer, { desc = 'Stage current buffer (gitsigns)' })
+vim.keymap.set('n', '<leader>Gr', gitsigns.reset_buffer, { desc = 'Reset current buffer (gitsigns)' })
