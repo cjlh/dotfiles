@@ -49,6 +49,31 @@ require('snacks').setup {
                     return require('snacks.picker.source.explorer').explorer(opts, ctx)
                 end,
             },
+            projects = {
+                dev = { '~/Work', '~/Documents', '~/Projects', '/tmp' },
+                patterns = {
+                    -- Snacks defaults
+                    '.git',
+                    '_darcs',
+                    '.hg',
+                    '.bzr',
+                    '.svn',
+                    'package.json',
+                    'Makefile',
+                    -- Python
+                    'pyproject.toml',
+                    'setup.py',
+                    'setup.cfg',
+                    'requirements.txt',
+                    'Pipfile',
+                    'uv.lock',
+                    'poetry.lock',
+                    '.venv',
+                    'venv',
+                    -- Agent sessions
+                    '.claude',
+                },
+            },
         },
     },
     explorer = {
