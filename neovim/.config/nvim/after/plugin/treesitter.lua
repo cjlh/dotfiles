@@ -13,6 +13,7 @@ require('nvim-treesitter').install {
     'gitattributes',
     'git_config',
     'git_rebase',
+    'diff',
     'javascript',
     'typescript',
     'tsx',
