@@ -210,3 +210,6 @@ end, { desc = 'Hover documentation (LSP)' })
 vim.keymap.set('n', '<leader>F', function()
     require('conform').format(nil, report_format_changes(0))
 end, { desc = 'Format and apply autofixes (Conform)' })
+
+-- Built-in `an` uses Treesitter, falling back to LSP selection range (unsupported by lua_ls) without a parser
+vim.keymap.set('n', '<leader>v', 'van', { remap = true, desc = 'Select node under cursor (Treesitter/LSP)' })
