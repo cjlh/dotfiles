@@ -1,13 +1,50 @@
 [core]
     eol = lf
     pager = nvimpager
+    editor = nvim
 [init]
-	defaultBranch = master
+    defaultBranch = master
 [color]
     pager = false  ; disable terminal colour codes for use with nvim
+[column]
+    ui = auto
+[commit]
+    verbose = true
+[branch]
+    sort = -committerdate
+[tag]
+    sort = version:refname
+[diff]
+    algorithm = histogram
+    colorMoved = plain
+    colorMovedWS = allow-indentation-change
+    mnemonicPrefix = true
+    renames = true
+    submodule = log
+[fetch]
+    prune = true
+    pruneTags = true
+    all = true
 [pull]
     rebase = true
+[push]
+    default = simple
+    # autoSetupRemote = true
+    followTags = true
 [rebase]
+    updateRefs = true
     autoStash = true
+    missingCommitsCheck = error
 [rerere]
     enabled = true
+    autoupdate = true
+[merge]
+    conflictstyle = zdiff3
+[help]
+    autocorrect = prompt
+[status]
+    submoduleSummary = true
+
+[url "git@github.com:"]
+    insteadOf = "https://github.com/"
+    insteadOf = "gh:"  ; e.g. clone with `git clone gh:name/repo`
