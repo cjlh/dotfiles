@@ -7,3 +7,5 @@ vim.keymap.set('n', '<leader>GD', function()
 end, {
     desc = 'Toggle diff view (diffview)',
 })
+
+vim.keymap.set('n', '<leader>Gf', '<cmd>DiffviewFileHistory %<CR>', { desc = 'Open current file history (diffview)' })

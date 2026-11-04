@@ -27,4 +27,6 @@ abbr gll "git log -n 10"
 abbr gcm "git commit -m"
 abbr gca "git commit --amend"
 
+abbr gf "nvim +Flog"
+
 abbr jj "just --unstable"
