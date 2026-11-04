@@ -52,9 +52,34 @@ local function report_format_changes(bufnr)
     end
 end
 
+local function format_on_save_disabled(bufnr)
+    -- Only disable format-on-save for these filetypes
+    if not vim.tbl_contains({ 'markdown', 'markdown.mdx', 'toml' }, vim.bo[bufnr].filetype) then
+        return false
+    end
+
+    -- Resolve symlinks, falling back to the raw path if it doesn't exist yet (e.g. new file)
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    path = vim.uv.fs_realpath(path) or path
+
+    -- Only disable format-on-save for files under these colon-separated directories (recursive)
+    local dirs = vim.split(vim.env.NVIM_NO_FORMAT_ON_SAVE_PATH or '', ':', { trimempty = true })
+    for _, dir in ipairs(dirs) do
+        dir = vim.fs.normalize(dir)
+        if vim.fs.relpath(vim.uv.fs_realpath(dir) or dir, path) then
+            return true
+        end
+    end
+
+    return false
+end
+
 require('conform').setup {
     -- Returning a callback alongside the options is supported but undocumented
     format_on_save = function(bufnr)
+        if format_on_save_disabled(bufnr) then
+            return
+        end
         return { timeout_ms = 500, lsp_format = 'fallback' }, report_format_changes(bufnr)
     end,
     formatters_by_ft = {
