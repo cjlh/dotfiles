@@ -1,18 +1,73 @@
 # Utility functions
 
-function mkcd
-    mkdir -p $argv[1]
-    if test -d "$argv[1]"
-        builtin cd $argv[1]
+function mkcd --description "Create a new directory and enter it"
+    if test (count $argv) -ne 1
+        echo "Usage: mkcd DIRECTORY" >&2
+        return 2
+    end
+
+    set -l target $argv[1]
+
+    if test -z "$target"
+        echo "mkcd: directory name cannot be empty" >&2
+        return 2
+    end
+
+    # A file (or a broken symlink) already at this path makes mkdir -p fail
+    if test -e "$target" -o -L "$target"; and not test -d "$target"
+        echo "mkcd: '$target' exists and is not a directory" >&2
+        return 1
+    end
+
+    mkdir -p -- "$target"; or return 1
+
+    # Anchor relative paths so CDPATH can't redirect us and names like "-" aren't treated as options
+    if not string match -q -- '/*' "$target"
+        set target "./$target"
+    end
+
+    cd -- "$target"
+end
+
+function cvdir --description "Replace an empty directory with a file of the same name (e.g. if accidentally used mkdir instead of touch)"
+    if test (count $argv) -ne 1
+        echo "Usage: cvdir DIRECTORY" >&2
+        return 2
+    end
+
+    # Strip trailing slashes so tab-completed "foo/" works (leaves "/" alone)
+    set -l target (string replace -r '(?<=.)/+$' '' -- $argv[1])
+
+    if test -L "$target"
+        echo "cvdir: '$target' is a symlink, not a directory" >&2
+        return 1
+    else if not test -e "$target"
+        echo "cvdir: '$target' does not exist" >&2
+        return 1
+    else if not test -d "$target"
+        echo "cvdir: '$target' is not a directory" >&2
+        return 1
+    end
+
+    # Include dotfiles; fish's .* never matches . or ..
+    set -l contents $target/* $target/.*
+    if set -q contents[1]
+        echo "cvdir: '$target' is not empty ("(count $contents)" entries)" >&2
+        return 1
+    end
+
+    rmdir -- "$target"; or return 1
+    touch -- "$target"; or begin
+        echo "cvdir: removed '$target' but failed to create the file" >&2
+        return 1
     end
 end
 
-function du-sort
+function du-sort --description "List all the children of the current directory, ordered by size"
     du -hs $argv[1]/* | sort -h
 end
 
-function git-stash-store
-    # Save snapshot of working tree into the stash without modifying working tree
+function git-stash-store --description "Save a snapshot of the working tree into the stash, without modifying the working tree"
     # First argument (optional) is the stash message
     if test -n "$argv[1]"
         git stash store -m "$argv[1]" (git stash create "$argv[1]")
@@ -31,7 +86,7 @@ function gdu --description "Diff all untracked files in one git diff"
     git reset --quiet -- $files
 end
 
-function docker-stop-all
+function docker-stop-all --description "Stop all running Docker containers"
     set -l containers (docker ps -q)
 
     if test (count $containers) -gt 0
@@ -41,7 +96,7 @@ function docker-stop-all
     end
 end
 
-function docker-nuke
+function docker-nuke --description "Delete all Docker build artefacts, images, containers, and volumes"
     # If disk too full for Docker to start, delete virtual disk, i.e. at:
     # ~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw
     docker buildx prune -af
@@ -49,7 +104,7 @@ function docker-nuke
     docker system prune -af --volumes
 end
 
-function j -d "use just command runner and rename terminal title"
+function j --description "Use just command runner and rename terminal title"
     # https://github.com/fish-shell/fish-shell/issues/8798
     if test (count $argv) -eq 1
         echo -n -e "\e]0;$argv (just)\a"

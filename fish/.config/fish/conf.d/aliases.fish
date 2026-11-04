@@ -23,6 +23,7 @@ abbr gd. "git diff ."
 abbr gds "git diff --staged"
 abbr gds. "git diff --staged ."
 abbr gl "git log -n 10 --oneline"
+abbr gll "git log -n 10"
 abbr gcm "git commit -m"
 abbr gca "git commit --amend"
 
