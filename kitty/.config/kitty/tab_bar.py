@@ -113,7 +113,7 @@ SPINNER_INTERVAL = 0.12  # seconds
 # Set on a tab manager while its tab bar is marked dirty only to be redrawn,
 # with nothing about its tabs or windows changed. on_tab_bar_dirty is called
 # synchronously, so watchers that only care about changes return early while it
-# is set. Must match tab_sessions.py and stack_bar.py, and any new watcher with
+# is set. Must match stack_bar.py, and any new watcher with
 # an on_tab_bar_dirty handler should check it too.
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
