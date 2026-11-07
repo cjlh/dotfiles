@@ -18,9 +18,9 @@ defaults write com.apple.WindowManager GloballyEnabled -bool false
 # Disable "Click wallpaper to show desktop" (sets to "Only in Stage Manager")
 defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
 
-# Increase timeout for screenshots to 20 seconds (default 5 seconds)
+# Increase timeout for screenshots to 5 minutes (default 5 seconds)
 # To reset: `defaults delete com.apple.screencaptureui "thumbnailExpiration"`
-defaults write com.apple.screencaptureui "thumbnailExpiration" -float 20 && killall SystemUIServer
+defaults write com.apple.screencaptureui "thumbnailExpiration" -float 300 && killall SystemUIServer
 
 # Allow dragging windows from arbitrary pointer locations with cmd+ctrl
 defaults write -g NSWindowShouldDragOnGesture -bool true
