@@ -1,6 +1,6 @@
 ---
 name: kitty-config-testing
-description: Test changes to the kitty terminal config in this dotfiles repo (including custom watchers and kittens) in a sandboxed, scriptable kitty instance before applying them, including against kitty nightly builds. Use when changing, debugging or verifying kitty config or kitty Python extensions, or when trying unreleased kitty features. Skill verified against kitty version 0.49.2 and 2026-10-16 nightly.
+description: Test changes to the kitty terminal config in this dotfiles repo (including custom watchers and kittens) in a sandboxed, scriptable kitty instance before applying them, including against kitty nightly builds. Use when changing, debugging or verifying kitty config or kitty Python extensions, or when trying unreleased kitty features. Skill verified against kitty versions 0.49.2 and 0.50.0, and the 2026-10-16 nightly.
 ---
 
 # Testing kitty config changes
@@ -24,10 +24,22 @@ word-split `$VARS`, and errors on globs with no matches).
 - `sandbox.sh <dir> [config line...]` creates a throwaway config directory that includes
   the real `kitty.conf`, symlinks every other real config file, and appends the given
   lines (later lines override earlier ones). To try a changed copy of a file, replace its
-  symlink in the sandbox with the copy.
+  symlink in the sandbox with the copy. Python files (watchers, kittens) are resolved
+  against the sandbox, but the `include ./…` lines of the real `kitty.conf` resolve next
+  to the real file, so replacing an included `.conf` (e.g. `watchers.conf`) in the
+  sandbox has no effect. Either add the changed lines to the sandbox `kitty.conf`, or copy
+  the real `kitty.conf` into the sandbox in place of the include.
+- Keep sandboxes on a short path, such as a `/tmp/<short>` symlink to the scratchpad.
+  The remote control socket lives in the sandbox, and macOS limits socket paths to 104
+  characters. Past that, kitty starts but the socket never appears.
 - `instance.sh start <sandbox> [kitty binary] [kitty args...]` starts a kitty for the
   sandbox in the background (it does not take focus from the user), with remote control
-  limited to a private socket in the sandbox. Then:
+  limited to a private socket in the sandbox, and a private cache directory
+  (`<sandbox>/cache`), so that sessions it saves for `restore_session_after_logout` are
+  never restored by the user's kitty. The keys of those sessions still go in the real
+  login keychain, so check none are left afterwards with
+  `security find-generic-password -s net.kovidgoyal.kitty.session-saved-at-logout`.
+  Then:
   - `instance.sh rc <sandbox> <kitten @ args...>` runs any remote control command, e.g.
     `launch --title B`, `goto-layout stack`, `action previous_window`,
     `send-text --match title:^B$ 'exit\r'` (what ctrl+d does at a prompt),
@@ -132,3 +144,12 @@ their docs), `docs/changelog.rst`.
   and backgrounds of the same colour stop matching.
 - The system `python3` is likely to be older than kitty's bundled Python: no backslashes
   inside f-string expressions in helper scripts run with it.
+- **Match expressions** split on spaces, so `--match 'title:^Quit kitty'` is two terms
+  and matches nothing. `title:` matches the window title, not the tab title, so use
+  `--match-tab title:…` for tabs, or `id:` from `ls`.
+- **Confirmation dialogs** (quitting, closing an OS window with programs running) are
+  windows titled `Quit kitty?` or `Close OS window`. Answer them with
+  `send-text --match id:<id> y` (or `n`). `send-key y` is ignored.
+- **Config reloads:** editing a sandbox file through a symlinked path does not trigger
+  kitty's automatic reload. Run `instance.sh rc <sandbox> load-config` instead. A reload
+  that changes the `watcher` lines loads the new watchers into the running instance.

@@ -39,7 +39,10 @@ case "$cmd" in
         # Launch the app bundle in the background with open -g, so the instance
         # does not take keyboard focus from whatever the user is typing in
         app=${kitty%/Contents/MacOS/kitty}
-        open -g -n -a "$app" --env "KITTY_CONFIG_DIRECTORY=$dir" --env "SHELL=$login_shell" \
+        # A private cache directory, so that sessions saved by the instance (see
+        # restore_session_after_logout) are never restored by the user's kitty
+        open -g -n -a "$app" --env "KITTY_CONFIG_DIRECTORY=$dir" --env "KITTY_CACHE_DIRECTORY=$dir/cache" \
+            --env "SHELL=$login_shell" \
             --stdout "$dir/kitty.log" --stderr "$dir/kitty.log" \
             --args -o allow_remote_control=socket-only -o "listen_on=unix:$dir/rc.sock" "$@"
         for _ in $(seq 50); do
