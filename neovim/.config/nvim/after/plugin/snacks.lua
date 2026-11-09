@@ -34,6 +34,11 @@ require('snacks').setup {
                 show_empty = true,
                 exclude = exclude_dirs,
             },
+            grep = {
+                hidden = true,
+                ignored = false,
+                exclude = exclude_dirs,
+            },
             explorer = {
                 win = {
                     input = {
