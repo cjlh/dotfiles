@@ -138,6 +138,29 @@ vim.keymap.set('n', '<C-space>', function()
     Snacks.picker.grep()
 end, { desc = 'Open file search (Snacks)' })
 
+vim.keymap.set('n', '<leader>gu', function()
+    Snacks.picker.git_status {
+        title = 'Unstaged changes',
+        ignored = false, -- Override global `picker.ignored`, which would list `!!` entries
+        transform = function(item)
+            -- `item.status` is the two-char porcelain XY code; Y is the worktree status
+            if item.status == '??' then
+                -- Untracked: drop hidden files and anything inside hidden dirs
+                if item.file:match '^%.' or item.file:match '/%.' then
+                    return false
+                end
+                item.group = 2
+            elseif item.status:sub(2, 2) ~= ' ' then
+                item.group = 1 -- Tracked with unstaged worktree changes
+            else
+                return false -- Only staged changes
+            end
+        end,
+        matcher = { sort_empty = true },
+        sort = { fields = { 'score:desc', 'group', 'file' } },
+    }
+end, { desc = 'Open unstaged and untracked git files (Snacks)' })
+
 vim.keymap.set('n', '<leader>u', function()
     Snacks.picker.undo()
 end, { desc = 'Undo history (Snacks)' })
