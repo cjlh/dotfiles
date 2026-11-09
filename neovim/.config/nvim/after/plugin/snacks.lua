@@ -107,9 +107,32 @@ vim.keymap.set('n', '<leader><leader>', function()
     Snacks.picker.files()
 end, { desc = 'Open file picker (Snacks)' })
 
+local function files_and_dirs(cwd)
+    Snacks.picker.files {
+        cwd = cwd,
+        -- Added to the default `fd --type f --type l`; only list immediate children
+        args = { '--type', 'd', '--max-depth', '1' },
+        transform = function(item)
+            -- fd suffixes directories with `/`
+            item.dir = item.file:sub(-1) == '/'
+            item.group = item.dir and 2 or 1 -- List directories after sibling files
+        end,
+        matcher = { sort_empty = true },
+        sort = { fields = { 'score:desc', 'group', 'file' } },
+        confirm = function(picker, item)
+            if item and item.dir then
+                picker:close()
+                files_and_dirs(Snacks.picker.util.path(item))
+            else
+                picker:action 'jump'
+            end
+        end,
+    }
+end
+
 vim.keymap.set('n', '<leader>f', function()
-    Snacks.picker.files { cwd = vim.fn.expand '%:p:h' }
-end, { desc = "Open file picker in current buffer's directory (Snacks)" })
+    files_and_dirs(vim.fn.expand '%:p:h')
+end, { desc = "Open file and directory picker in current buffer's directory (Snacks)" })
 
 vim.keymap.set('n', '<C-space>', function()
     Snacks.picker.grep()
