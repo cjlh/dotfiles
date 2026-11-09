@@ -166,6 +166,17 @@ vim.keymap.set('n', '<leader>gu', function()
     }
 end, { desc = 'Open unstaged and untracked git files (Snacks)' })
 
+vim.keymap.set({ 'n', 'x' }, '<leader>gy', function()
+    Snacks.gitbrowse {
+        what = 'permalink',
+        notify = false,
+        open = function(url)
+            vim.fn.setreg('+', url)
+            vim.notify('Copied: ' .. url)
+        end,
+    }
+end, { desc = 'Copy git permalink for file/selection to clipboard (Snacks)' })
+
 vim.keymap.set('n', '<leader>u', function()
     Snacks.picker.undo()
 end, { desc = 'Undo history (Snacks)' })
