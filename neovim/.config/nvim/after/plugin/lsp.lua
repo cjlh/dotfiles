@@ -103,6 +103,16 @@ require('conform').setup {
                 'off',
             },
         },
+        taplo = {
+            -- Default to 4-space indents, unless the project has a taplo config (CLI options
+            -- would otherwise take precedence over it)
+            append_args = function(_, ctx)
+                if vim.fs.find({ '.taplo.toml', 'taplo.toml' }, { path = ctx.dirname, upward = true })[1] then
+                    return {}
+                end
+                return { '--option', 'indent_string=    ' }
+            end,
+        },
     },
     default_format_opts = {
         lsp_format = 'fallback',
