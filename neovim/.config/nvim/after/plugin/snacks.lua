@@ -96,9 +96,12 @@ vim.api.nvim_create_user_command('Explorer', toggle_explorer, { desc = 'Toggle t
 
 vim.keymap.set('n', '<leader>e', toggle_explorer, { desc = 'Toggle explorer (Snacks)' })
 
-vim.keymap.set({ 'n', 't' }, '<C-/>', function()
+local function toggle_terminal()
     Snacks.terminal.toggle()
-end, { desc = 'Toggle terminal (Snacks)' })
+end
+
+vim.keymap.set({ 'n', 't' }, '<C-/>', toggle_terminal, { desc = 'Toggle terminal (Snacks)' })
+vim.keymap.set('n', '<leader>/', toggle_terminal, { desc = 'Toggle terminal (Snacks)' })
 
 vim.keymap.set('n', '<leader><leader>', function()
     Snacks.picker.files()
