@@ -56,3 +56,8 @@ vim.pack.add {
     'https://github.com/folke/snacks.nvim',
     'https://github.com/nvim-tree/nvim-web-devicons',
 }
+
+-- Render markdown in buffer
+vim.pack.add {
+    'https://github.com/MeanderingProgrammer/render-markdown.nvim',
+}
