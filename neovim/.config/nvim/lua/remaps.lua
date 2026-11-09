@@ -40,6 +40,10 @@ vim.keymap.set('n', '<C-l>', '<C-w>l', { desc = 'Move to right window' })
 vim.keymap.set('v', 'J', ":m '>+1<CR>gv=gv", { desc = 'Move line down' })
 vim.keymap.set('v', 'K', ":m '<-2<CR>gv=gv", { desc = 'Move line up' })
 
+-- Keep selection after indenting in visual mode
+vim.keymap.set('v', '<', '<gv', { desc = 'Dedent and reselect' })
+vim.keymap.set('v', '>', '>gv', { desc = 'Indent and reselect' })
+
 -- Switch to alternate (previous) buffer (avoids conflicts with window manager)
 vim.keymap.set('n', '<leader><Tab>', '<C-^>', { desc = 'Switch to alternate buffer' })
 
