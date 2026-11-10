@@ -657,13 +657,20 @@ def _mark_tab_bar_dirty(*tab_managers) -> None:
     wakeup_main_loop()
 
 
-def _draw_right_status(screen: Screen) -> None:
+def _draw_right_status(screen: Screen, for_layout: bool) -> None:
     text = " ".join(t for t in (p.status_text() for p in _providers()) if t)
 
     if not text:
         return
 
-    padding = screen.columns - screen.cursor.x - wcswidth(text)
+    # Kitty first measures the tabs to decide how much room each title gets.
+    # During that step, leave just one space before the status text. Pushing
+    # it to the right edge would make Kitty think the last tab needs all the
+    # remaining room, so other tab titles would stay shortened unnecessarily.
+    if for_layout:
+        padding = 1
+    else:
+        padding = screen.columns - screen.cursor.x - wcswidth(text)
 
     if padding < 1:
         return
@@ -736,6 +743,6 @@ def draw_tab(
     )
 
     if is_last:
-        _draw_right_status(screen)
+        _draw_right_status(screen, extra_data.for_layout)
 
     return end
