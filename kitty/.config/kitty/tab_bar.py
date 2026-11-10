@@ -47,8 +47,10 @@ from kitty.tab_bar import (
     DrawData,
     ExtraData,
     TabBarData,
+    apply_title_template,
     as_rgb,
     draw_tab_with_separator,
+    truncate_line,
 )
 from kitty.utils import log_error
 
@@ -93,6 +95,9 @@ STATUS_TAG_ICONS = {
     "failed": "☒",
 }
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
+
+# The formatting codes {fmt...} expands to in title templates
+SGR_ESCAPE = re.compile(r"\x1b\[[0-9:;]*m")
 
 # Set on tabs by name_tab.py while it generates their name, must match there
 NAMING_ATTR = "name_tab_previous_name"
@@ -424,7 +429,9 @@ class PickedIcons:
 
         # namer refreshes every name in a run or none of them.
         refresh = self.queue[0][1].refresh
-        picking = [tab_icon for _, tab_icon in self.queue if tab_icon.refresh == refresh]
+        picking = [
+            tab_icon for _, tab_icon in self.queue if tab_icon.refresh == refresh
+        ]
         self.queue = [item for item in self.queue if item[1].refresh != refresh]
         names = list(dict.fromkeys(tab_icon.name for tab_icon in picking))
         self.running = True
@@ -450,9 +457,7 @@ class PickedIcons:
                     ):
                         icons = dict(zip(names, lines))
                 if not icons:
-                    log_error(
-                        f"tab_bar.py: namer failed with exit code {exit_code}"
-                    )
+                    log_error(f"tab_bar.py: namer failed with exit code {exit_code}")
             except OSError:
                 pass
             finally:
@@ -555,7 +560,9 @@ def _picked_icons() -> PickedIcons:
 
 def _spinner() -> Spinner:
     return _shared(
-        "spinner", Spinner, lambda old, new: _remove_timer(getattr(old, "timer_id", None))
+        "spinner",
+        Spinner,
+        lambda old, new: _remove_timer(getattr(old, "timer_id", None)),
     )
 
 
@@ -657,8 +664,12 @@ def _mark_tab_bar_dirty(*tab_managers) -> None:
     wakeup_main_loop()
 
 
+def _right_status_text() -> str:
+    return " ".join(t for t in (p.status_text() for p in _providers()) if t)
+
+
 def _draw_right_status(screen: Screen, for_layout: bool) -> None:
-    text = " ".join(t for t in (p.status_text() for p in _providers()) if t)
+    text = _right_status_text()
 
     if not text:
         return
@@ -724,6 +735,28 @@ def _tab_title(tab: TabBarData) -> str:
     return f"{spinner} {short}" if spinner else short
 
 
+def _fit_title(
+    draw_data: DrawData, tab: TabBarData, index: int, max_tab_length: int
+) -> TabBarData:
+    """tab with its title shortened to an ellipsis, so that the whole tab fits
+    in max_tab_length cells. Otherwise kitty draws its own ellipsis over the
+    last cell of the tab, cutting off whatever the title template draws after
+    the title."""
+    template = apply_title_template(draw_data, tab._replace(title=""), index)
+    room = (
+        max_tab_length
+        - wcswidth(SGR_ESCAPE.sub("", template))
+        - draw_data.leading_spaces
+        - min(max_tab_length - 1, draw_data.trailing_spaces)
+    )
+
+    # Without room for a character and the ellipsis, leave it to kitty
+    if room < 2 or wcswidth(tab.title) <= room:
+        return tab
+
+    return tab._replace(title=truncate_line(tab.title, room))
+
+
 def draw_tab(
     draw_data: DrawData,
     screen: Screen,
@@ -737,6 +770,15 @@ def draw_tab(
     _shared("timer", _start_timer, lambda old, new: _remove_timer(old))
 
     tab = tab._replace(title=_tab_title(tab))
+
+    # Kitty leaves an extra unused cell per tab, which accumulates at status area. Let
+    # the last tab use this space.
+    if is_last and not extra_data.for_layout:
+        text = _right_status_text()
+        room = screen.columns - before - (wcswidth(text) + 1 if text else 0)
+        max_title_length = max(max_title_length, room)
+
+    tab = _fit_title(draw_data, tab, index, max_title_length)
 
     end = draw_tab_with_separator(
         draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
