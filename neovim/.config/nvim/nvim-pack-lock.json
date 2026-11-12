@@ -29,6 +29,11 @@
       "rev": "6f76a3eeadc2ee235d74cd7d5319e95a261084af",
       "src": "https://github.com/neovim/nvim-lspconfig"
     },
+    "nvim-scrollbar": {
+      "rev": "577c488dc6f30cd0e2faa5eebe6e19f7d343181e",
+      "src": "https://github.com/petertriho/nvim-scrollbar",
+      "version": "'refactor/v2'"
+    },
     "nvim-treesitter": {
       "rev": "4916d6592ede8c07973490d9322f187e07dfefac",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",

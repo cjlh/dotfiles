@@ -61,3 +61,9 @@ vim.pack.add {
 vim.pack.add {
     'https://github.com/MeanderingProgrammer/render-markdown.nvim',
 }
+
+-- Add scrollbar
+vim.pack.add {
+    -- TODO: Drop `version` once v2 lands on main (2026-11-16)
+    { src = 'https://github.com/petertriho/nvim-scrollbar', version = 'refactor/v2' },
+}

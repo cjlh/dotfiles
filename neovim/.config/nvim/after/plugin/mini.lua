@@ -3,6 +3,9 @@
 -- LSP completion (built-in completion is opt-in and left disabled)
 require('mini.completion').setup {}
 
+-- Only used for nvim-scrollbar diff markers
+require('mini.diff').setup {}
+
 -- Only used for LSP snippets currently
 require('mini.snippets').setup {
     mappings = {
