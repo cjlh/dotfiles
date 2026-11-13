@@ -64,6 +64,10 @@ LOADED_AT = time.monotonic()
 CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
+# Programs whose tabs show their full window title rather than its first word,
+# matched against the name they were run as: Claude Code's executable is named
+# after its version, so the foreground exe can't be used
+FULL_TITLE_PROGRAMS = frozenset({"claude", "codex"})
 # seconds; its first run on a machine downloads llama.cpp and d1-2B (1.8 GB)
 NAMER_TIMEOUT = 600
 
@@ -702,6 +706,24 @@ def _short_title(title: str) -> str:
     return short
 
 
+def _shows_full_title(tab) -> bool:
+    """Whether the active window of tab is running one of FULL_TITLE_PROGRAMS."""
+    window = tab.active_window
+
+    if window is None:
+        return False
+
+    try:
+        processes = window.child.foreground_processes
+    except Exception:
+        return False
+
+    return any(
+        p["cmdline"] and os.path.basename(p["cmdline"][0]) in FULL_TITLE_PROGRAMS
+        for p in processes
+    )
+
+
 def _renamed_tab_icon(tab) -> str:
     if RENAMED_TAB_ICON_MODE == "fixed":
         return RENAMED_TAB_FIXED_ICON
@@ -731,7 +753,11 @@ def _tab_title(tab: TabBarData) -> str:
             return f"{spinner or icon} {t.name[match.end() :]}".rstrip()
         return f"{spinner or _renamed_tab_icon(t)} {tab.title}"
 
-    short = _short_title(tab.title)
+    short = (
+        tab.title
+        if t is not None and _shows_full_title(t)
+        else _short_title(tab.title)
+    )
     return f"{spinner} {short}" if spinner else short
 
 
