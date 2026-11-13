@@ -19,3 +19,5 @@ scrollbar.setup {
         placement = { relative = 'editor' },
     },
 }
+
+vim.keymap.set('n', '<leader>m', require('scrollbar.minimap').toggle, { desc = 'Toggle minimap scrollbar' })
