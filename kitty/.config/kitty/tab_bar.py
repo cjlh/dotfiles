@@ -1,8 +1,10 @@
 # Custom tab bar that displays available disk space, Codex and Claude Code
 # usage in the far right corner. Disk space is sampled every redraw interval.
 # All providers read JSON caches in ~/.cache/kitty-tab-bar and refresh them
-# concurrently in the background. Agent usage is refreshed every
-# CCUSAGE_REFRESH_INTERVAL seconds.
+# concurrently in the background. Agent usage is the percentage used of each
+# subscription's session limit, followed in brackets by that of its weekly
+# limit once it reaches WEEKLY_USAGE_THRESHOLD. It is read by agent_usage.py
+# every AGENT_USAGE_REFRESH_INTERVAL seconds.
 #
 # Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
 # mode the icon is picked by the namer script from this repo's scripts
@@ -35,7 +37,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from kitty.boss import get_boss
-from kitty.constants import clear_handled_signals
+from kitty.constants import clear_handled_signals, config_dir, kitty_exe
 from kitty.fast_data_types import (
     Screen,
     add_timer,
@@ -54,8 +56,10 @@ from kitty.tab_bar import (
 )
 from kitty.utils import log_error
 
-CCUSAGE_REFRESH_INTERVAL = 300  # seconds between ccusage runs
-CCUSAGE_TIMEOUT = 120  # seconds before a ccusage run is killed
+AGENT_USAGE_REFRESH_INTERVAL = 180  # seconds between agent_usage.py runs
+AGENT_USAGE_TIMEOUT = 60  # seconds before an agent_usage.py run is killed
+# Percentage of an agent's weekly limit from which it is shown
+WEEKLY_USAGE_THRESHOLD = 50
 DISK_TIMEOUT = 5  # seconds before a disk query is abandoned
 DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
@@ -222,6 +226,7 @@ class StatusProvider:
         self.refreshing = False
         self.next_refresh = None
         self.mtime = None
+        self.data = None
         self.text = ""
 
     def start_fetch(self, output_path: str, done) -> None:
@@ -237,9 +242,10 @@ class StatusProvider:
             mtime = os.stat(self.cache_path).st_mtime_ns
             if mtime != self.mtime:
                 with open(self.cache_path) as f:
-                    data = json.load(f)
-                self.text = self.format_data(data)
+                    self.data = json.load(f)
                 self.mtime = mtime
+            # Formatted on every draw, as it may depend on the time.
+            self.text = self.format_data(self.data)
         except (OSError, ValueError, KeyError, TypeError):
             # Keep the last successful value if a cache becomes unreadable.
             pass
@@ -338,35 +344,47 @@ class DiskProvider(StatusProvider):
 
 
 class AgentUsageProvider(StatusProvider):
-    """Daily usage cost for one ccusage tool (claude, codex, ...)."""
+    """How much of one coding agent's (claude, codex) subscription limits has
+    been used, as read by agent_usage.py."""
 
-    def __init__(self, tool: str, icon: str, cost_key: str) -> None:
-        super().__init__(tool, icon, CCUSAGE_REFRESH_INTERVAL)
-        self.cost_key = cost_key
+    def __init__(self, tool: str, icon: str) -> None:
+        super().__init__(tool, icon, AGENT_USAGE_REFRESH_INTERVAL)
 
     def start_fetch(self, output_path: str, done) -> None:
         # kitty may be launched from the Dock without Homebrew in PATH.
         env = {**os.environ, "PATH": HELPER_PATH}
         _run_monitored(
             [
-                "bunx",
-                "ccusage",
+                kitty_exe(),
+                "+launch",
+                os.path.join(config_dir, "agent_usage.py"),
                 self.name,
-                "daily",
-                "--last",
-                "1",
-                "--offline",
-                "--json",
             ],
             output_path,
-            CCUSAGE_TIMEOUT,
+            AGENT_USAGE_TIMEOUT,
             lambda exit_code: done(exit_code == 0),
             env,
         )
 
     def format_data(self, data) -> str:
-        cost = data["totals"][self.cost_key]
-        return f"{self.icon} {cost:,.2f}" if cost > 0 else ""
+        if data is None:  # The agent no longer reports its usage as expected.
+            return ""
+        now = time.time()
+        session = self._used_percent(data["session"], now)
+        weekly = self._used_percent(data["weekly"], now)
+        text = f"{self.icon} {session}%"
+        if weekly >= WEEKLY_USAGE_THRESHOLD:
+            text += f" ({weekly}%)"
+        return text
+
+    @staticmethod
+    def _used_percent(window, now: float) -> int:
+        # Usage can't always be refreshed, e.g. Claude Code's while it hasn't
+        # been used for some hours, so assume none since a limit has reset.
+        resets_at = window["resets_at"]
+        if resets_at is not None and resets_at <= now:
+            return 0
+        return round(window["percent"])
 
 
 @dataclass
@@ -575,8 +593,8 @@ def _providers() -> tuple[StatusProvider, ...]:
         "providers",
         lambda: (
             DiskProvider(),
-            AgentUsageProvider("codex", "⌬", "costUSD"),
-            AgentUsageProvider("claude", "✻", "totalCost"),
+            AgentUsageProvider("codex", "⌬"),
+            AgentUsageProvider("claude", "✻"),
         ),
     )
 

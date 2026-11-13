@@ -44,7 +44,6 @@ stow git
 git config --global include.path ~/.gitconfig.d/shared
 
 # Kitty terminal (https://github.com/kovidgoyal/kitty)
-brew install bunx  # for ccusage
 brew install --cask kitty
 stow kitty
 
