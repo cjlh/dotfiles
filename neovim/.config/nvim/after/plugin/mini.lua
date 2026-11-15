@@ -1,12 +1,21 @@
 -- https://github.com/nvim-mini/mini.nvim/blob/main/readmes/mini-files.md
 require('mini.files').setup {
     windows = { preview = true, width_preview = 50 },
+    content = {
+        -- Hide hidden directories, but keep hidden files
+        filter = function(fs_entry)
+            return not (fs_entry.fs_type == 'directory' and vim.startswith(fs_entry.name, '.'))
+        end,
+    },
 }
 
 vim.keymap.set('n', '<leader>e', function()
     -- close() returns a falsy value when no explorer is open
     if not MiniFiles.close() then
-        MiniFiles.open()
+        local buf_name = vim.api.nvim_buf_get_name(0)
+        local path = vim.fn.filereadable(buf_name) == 1 and buf_name or vim.fn.getcwd()
+        MiniFiles.open(path)
+        MiniFiles.reveal_cwd()
     end
 end, { desc = 'Toggle mini.files' })
 
