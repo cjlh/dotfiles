@@ -1,0 +1,41 @@
+# Status items shown at the right of the tab bar by tab_bar.py, in order.
+#
+# If status_providers.local.toml exists next to this file it is read instead,
+# so that a machine (or branch) can show other items without changing this
+# file. Changes take effect when kitty's config is reloaded.
+#
+# Each [[provider]] has a unique name, of letters, digits, "-" and "_". The
+# name "disk" is the built-in available disk space, which takes no other keys.
+# Any other provider takes:
+#
+#   command   Program and arguments printing the item's data as JSON, required.
+#             Run in this directory every interval, in the background, with
+#             "kitty" being the running kitty. If it fails the last data stays.
+#   format    How the data is shown after the icon:
+#             "text" (default)  {"text": "12 EUR"}
+#             "usage"           {"session": {"percent": 27.0, "resets_at": 1794595800},
+#                                "weekly": {"percent": 6.0, "resets_at": null}}
+#                               shown as "27%", or "27% (60%)" once the weekly
+#                               percentage reaches weekly_threshold. Each
+#                               resets_at is in seconds since the epoch, after
+#                               which that percentage is taken to be 0.
+#             Either way, data of null hides the item.
+#   icon      Shown before the data, default none.
+#   interval  Seconds between runs of command, default 180.
+#   timeout   Seconds before a run of command is killed, default 60.
+#   weekly_threshold  See the "usage" format, default 50.
+
+[[provider]]
+name = "disk"
+
+[[provider]]
+name = "codex"
+icon = "⌬"
+command = ["kitty", "+launch", "agent_usage.py", "codex"]
+format = "usage"
+
+[[provider]]
+name = "claude"
+icon = "✻"
+command = ["kitty", "+launch", "agent_usage.py", "claude"]
+format = "usage"

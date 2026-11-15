@@ -1,10 +1,10 @@
-# Custom tab bar that displays available disk space, Codex and Claude Code
-# usage in the far right corner. Disk space is sampled every redraw interval.
-# All providers read JSON caches in ~/.cache/kitty-tab-bar and refresh them
-# concurrently in the background. Agent usage is the percentage used of each
-# subscription's session limit, followed in brackets by that of its weekly
-# limit once it reaches WEEKLY_USAGE_THRESHOLD. It is read by agent_usage.py
-# every AGENT_USAGE_REFRESH_INTERVAL seconds.
+# Custom tab bar that displays status items in the far right corner, by
+# default available disk space, Codex and Claude Code usage. The items are
+# listed in status_providers.toml, or status_providers.local.toml if it
+# exists, which also documents how to add one: besides disk space, which is
+# sampled every redraw interval, each is a command printing JSON. All providers
+# read JSON caches in ~/.cache/kitty-tab-bar and refresh them concurrently in
+# the background.
 #
 # Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
 # mode the icon is picked by the namer script from this repo's scripts
@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -56,8 +57,15 @@ from kitty.tab_bar import (
 )
 from kitty.utils import log_error
 
-AGENT_USAGE_REFRESH_INTERVAL = 180  # seconds between agent_usage.py runs
-AGENT_USAGE_TIMEOUT = 60  # seconds before an agent_usage.py run is killed
+# Status items to show, the first of these files that exists. See the latter.
+PROVIDERS_PATHS = tuple(
+    os.path.join(config_dir, name)
+    for name in ("status_providers.local.toml", "status_providers.toml")
+)
+PROVIDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
+# Defaults of a provider's keys in PROVIDERS_PATHS
+COMMAND_REFRESH_INTERVAL = 180  # seconds between runs of its command
+COMMAND_TIMEOUT = 60  # seconds before a run of its command is killed
 # Percentage of an agent's weekly limit from which it is shown
 WEEKLY_USAGE_THRESHOLD = 50
 DISK_TIMEOUT = 5  # seconds before a disk query is abandoned
@@ -78,6 +86,7 @@ NAMER_TIMEOUT = 600
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH.
 HELPER_PATH = os.pathsep.join(
     [
+        os.path.dirname(kitty_exe()),  # so that "kitty" is the running one
         os.path.expanduser("~/.local/bin"),
         "/opt/homebrew/bin",
         os.environ.get("PATH", ""),
@@ -343,37 +352,85 @@ class DiskProvider(StatusProvider):
         return f"{self.icon} {data // 1_000_000_000}G"
 
 
-class AgentUsageProvider(StatusProvider):
-    """How much of one coding agent's (claude, codex) subscription limits has
-    been used, as read by agent_usage.py."""
+class CommandProvider(StatusProvider):
+    """A status item whose data is printed as JSON by a command, as listed in
+    PROVIDERS_PATHS. Subclasses are the formats the data can be in."""
 
-    def __init__(self, tool: str, icon: str) -> None:
-        super().__init__(tool, icon, AGENT_USAGE_REFRESH_INTERVAL)
+    def __init__(
+        self,
+        name: str,
+        command: list[str],
+        icon: str = "",
+        interval: int = COMMAND_REFRESH_INTERVAL,
+        timeout: int = COMMAND_TIMEOUT,
+    ) -> None:
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(arg, str) for arg in command)
+        ):
+            raise ValueError("command must be a list of strings")
+        if not isinstance(icon, str):
+            raise ValueError("icon must be a string")
+        for seconds in (interval, timeout):
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+                raise ValueError("interval and timeout must be numbers")
+            if seconds <= 0:
+                raise ValueError("interval and timeout must be positive")
+        super().__init__(name, icon, interval)
+        self.command = command
+        self.timeout = timeout
 
     def start_fetch(self, output_path: str, done) -> None:
         # kitty may be launched from the Dock without Homebrew in PATH.
         env = {**os.environ, "PATH": HELPER_PATH}
         _run_monitored(
-            [
-                kitty_exe(),
-                "+launch",
-                os.path.join(config_dir, "agent_usage.py"),
-                self.name,
-            ],
+            self.command,
             output_path,
-            AGENT_USAGE_TIMEOUT,
+            self.timeout,
             lambda exit_code: done(exit_code == 0),
             env,
+            config_dir,
         )
 
     def format_data(self, data) -> str:
-        if data is None:  # The agent no longer reports its usage as expected.
+        if data is None:  # The command has nothing to show.
             return ""
+        text = self.format_text(data)
+        return f"{self.icon} {text}".lstrip() if text else ""
+
+    def format_text(self, data) -> str:
+        raise NotImplementedError
+
+
+class TextProvider(CommandProvider):
+    """Shows the text printed by its command as is."""
+
+    def format_text(self, data) -> str:
+        text = data["text"]
+        if not isinstance(text, str):
+            raise TypeError("Invalid text")
+        return text
+
+
+class UsageProvider(CommandProvider):
+    """Shows how much of a subscription's session and weekly limits has been
+    used, e.g. that of a coding agent as printed by agent_usage.py."""
+
+    def __init__(
+        self, *args, weekly_threshold: float = WEEKLY_USAGE_THRESHOLD, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if not isinstance(weekly_threshold, (int, float)):
+            raise ValueError("weekly_threshold must be a number")
+        self.weekly_threshold = weekly_threshold
+
+    def format_text(self, data) -> str:
         now = time.time()
         session = self._used_percent(data["session"], now)
         weekly = self._used_percent(data["weekly"], now)
-        text = f"{self.icon} {session}%"
-        if weekly >= WEEKLY_USAGE_THRESHOLD:
+        text = f"{session}%"
+        if weekly >= self.weekly_threshold:
             text += f" ({weekly}%)"
         return text
 
@@ -385,6 +442,56 @@ class AgentUsageProvider(StatusProvider):
         if resets_at is not None and resets_at <= now:
             return 0
         return round(window["percent"])
+
+
+# Providers that take no command, by the name they are listed under
+BUILTIN_PROVIDERS = {"disk": DiskProvider}
+# Values of a provider's format key
+COMMAND_PROVIDERS = {"text": TextProvider, "usage": UsageProvider}
+
+
+def _create_provider(spec) -> StatusProvider:
+    """The provider described by spec, a [[provider]] of PROVIDERS_PATHS."""
+    spec = dict(spec)
+    name = spec.pop("name")
+    if not isinstance(name, str) or not PROVIDER_NAME.fullmatch(name):
+        raise ValueError(f"invalid name {name!r}")
+    if "command" not in spec and name in BUILTIN_PROVIDERS:
+        if spec:
+            raise ValueError(f"{name} takes no {', '.join(spec)}")
+        return BUILTIN_PROVIDERS[name]()
+    format = spec.pop("format", "text")
+    if format not in COMMAND_PROVIDERS:
+        raise ValueError(f"unknown format {format!r}")
+    # Raises TypeError on missing and unknown keys.
+    return COMMAND_PROVIDERS[format](name, **spec)
+
+
+def _load_providers() -> tuple[StatusProvider, ...]:
+    """The providers listed in the first of PROVIDERS_PATHS that exists.
+    Mistakes are logged, and only cost the providers they are in."""
+    path = next((p for p in PROVIDERS_PATHS if os.path.exists(p)), PROVIDERS_PATHS[-1])
+    try:
+        with open(path, "rb") as f:
+            specs = tomllib.load(f)["provider"]
+        if not isinstance(specs, list):
+            raise TypeError("provider must be an array of tables")
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        log_error(f"tab_bar.py: failed to read {path}: {e!r}")
+        return (DiskProvider(),)
+
+    providers = {}
+    for spec in specs:
+        try:
+            provider = _create_provider(spec)
+            if provider.name in providers:
+                raise ValueError("listed twice")
+        except (KeyError, TypeError, ValueError) as e:
+            name = spec.get("name") if isinstance(spec, dict) else spec
+            log_error(f"tab_bar.py: skipping provider {name!r} of {path}: {e!r}")
+        else:
+            providers[provider.name] = provider
+    return tuple(providers.values())
 
 
 @dataclass
@@ -589,17 +696,12 @@ def _spinner() -> Spinner:
 
 
 def _providers() -> tuple[StatusProvider, ...]:
-    return _shared(
-        "providers",
-        lambda: (
-            DiskProvider(),
-            AgentUsageProvider("codex", "⌬"),
-            AgentUsageProvider("claude", "✻"),
-        ),
-    )
+    return _shared("providers", _load_providers)
 
 
-def _run_monitored(args, output_path: str, timeout: int, done, env=None) -> None:
+def _run_monitored(
+    args, output_path: str, timeout: int, done, env=None, cwd=None
+) -> None:
     """Run args in the background with stdout written to output_path, then
     call done(exit_code) on kitty's main thread, with None if it took longer
     than timeout seconds."""
@@ -607,6 +709,7 @@ def _run_monitored(args, output_path: str, timeout: int, done, env=None) -> None
         process = subprocess.Popen(
             args,
             env=env,
+            cwd=cwd,
             stdin=subprocess.DEVNULL,
             stdout=output,
             stderr=subprocess.DEVNULL,
@@ -772,9 +875,7 @@ def _tab_title(tab: TabBarData) -> str:
         return f"{spinner or _renamed_tab_icon(t)} {tab.title}"
 
     short = (
-        tab.title
-        if t is not None and _shows_full_title(t)
-        else _short_title(tab.title)
+        tab.title if t is not None and _shows_full_title(t) else _short_title(tab.title)
     )
     return f"{spinner} {short}" if spinner else short
 

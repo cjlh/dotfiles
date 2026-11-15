@@ -1,7 +1,8 @@
 # Helper script generated using Claude.
 #
 # Prints how much of a coding agent's subscription limits have been used, for
-# tab_bar.py, which runs it in the background with kitty's own Python:
+# the "usage" format of tab_bar.py's status items, see status_providers.toml.
+# It is run with kitty's own Python:
 #
 #   kitty +launch agent_usage.py claude|codex
 #
