@@ -45,6 +45,25 @@ require('mini.snippets').setup {
 -- Completion and autocorrect in command line
 require('mini.cmdline').setup {}
 
+-- Delete buffers while preserving window layout
+require('mini.bufremove').setup {}
+
+vim.keymap.set('n', '<leader>bd', function()
+    if not vim.bo.modified then
+        MiniBufremove.delete(0)
+        return
+    end
+
+    local name = vim.fn.bufname()
+    local msg = name == '' and 'Buffer not saved. Are you sure you want to delete it?'
+        or ('There are unsaved changes to %q. Are you sure you want to delete the buffer?'):format(name)
+
+    -- Default to No
+    if vim.fn.confirm(msg, '&Yes\n&No', 2) == 1 then
+        MiniBufremove.delete(0, true)
+    end
+end, { desc = 'Delete buffer (mini.bufremove)' })
+
 vim.api.nvim_create_autocmd('FileType', {
     pattern = 'snacks_picker_input',
     desc = 'Disable mini.completion for snacks picker',
