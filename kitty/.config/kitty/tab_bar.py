@@ -67,7 +67,7 @@ PROVIDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 COMMAND_REFRESH_INTERVAL = 180  # seconds between runs of its command
 COMMAND_TIMEOUT = 60  # seconds before a run of its command is killed
 # Percentage of an agent's weekly limit from which it is shown
-WEEKLY_USAGE_THRESHOLD = 50
+WEEKLY_USAGE_THRESHOLD = 0
 DISK_TIMEOUT = 5  # seconds before a disk query is abandoned
 DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
@@ -429,9 +429,9 @@ class UsageProvider(CommandProvider):
         now = time.time()
         session = self._used_percent(data["session"], now)
         weekly = self._used_percent(data["weekly"], now)
-        text = f"{session}%"
+        text = f"{session}"
         if weekly >= self.weekly_threshold:
-            text += f" ({weekly}%)"
+            text += f"/{weekly}"
         return text
 
     @staticmethod
