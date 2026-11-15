@@ -1,12 +1,13 @@
 # Custom kitten generated using Claude.
 #
 # Prototype that names the active tab after the task it is being used for. A
-# snapshot of the tab's windows (titles, working directories, running programs,
-# last commands and screen text) is named in the background by the namer script
-# from this repo's scripts package, which adds the state of the Git
-# repositories they are in. A decision model, d1-2B, decides whether it shows
-# what the tab is being used for while the model TAB_NAMING_MODE picks names
-# it, and d1-2B then picks an icon for the name.
+# snapshot of the tab's windows (titles, working directories, running programs
+# and their processes, last commands and screen text) is named in the
+# background by the namer script from this repo's scripts package, which adds
+# the state of the Git repositories they are in and replaces the screens of
+# Claude Code and Codex with their transcripts. A decision model, d1-2B,
+# decides whether it shows what the tab is being used for while the model
+# TAB_NAMING_MODE names it, and d1-2B then picks an icon for the name.
 #
 # While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
 # place of its icon. It is then renamed with the generated name and icon, unless
@@ -89,7 +90,8 @@ def _window_snapshot(window: Window) -> dict:
     # The program the shell started is the oldest process in the foreground,
     # kitty otherwise takes the newest, such as a language server started by an
     # editor or agent
-    oldest = min(window.child.foreground_processes, key=lambda p: p["pid"], default=None)
+    processes = window.child.foreground_processes
+    oldest = min(processes, key=lambda p: p["pid"], default=None)
     command = (oldest and oldest["cmdline"]) or window.child.cmdline
     return {
         "title": window.title,
@@ -98,6 +100,11 @@ def _window_snapshot(window: Window) -> dict:
         "last_command": window.last_cmd_cmdline or None,
         "last_exit_status": window.last_cmd_exit_status,
         "screen": _screen_text(window),
+        # For namer to find the transcripts of agents such as Claude Code,
+        # which may have started processes of their own in the foreground
+        "processes": [
+            {"pid": p["pid"], "cmdline": p["cmdline"]} for p in processes
+        ],
     }
 
 
