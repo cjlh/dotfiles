@@ -433,6 +433,26 @@ def icon(
 
 
 @app.command()
+def icons() -> None:
+    """Print the icons as JSON, {"<id>": ["<icon>", "<meaning>"]}, in the order
+    to list them in."""
+    print(json.dumps(ICONS))
+
+
+@app.command()
+def set_icon(
+    name: Annotated[str, typer.Argument(metavar="NAME")],
+    icon_id: Annotated[str, typer.Argument(metavar="ICON_ID")],
+) -> None:
+    """Cache ICON_ID as NAME's icon, such as one the user chose, until NAME is
+    forgotten or its icon picked anew."""
+    if icon_id not in ICONS:
+        print(f"Unknown icon {icon_id!r}, see 'namer icons'", file=sys.stderr)
+        raise typer.Exit(1)
+    update_cache({name: icon_id})
+
+
+@app.command()
 def tab(
     snapshot: Annotated[
         str,
