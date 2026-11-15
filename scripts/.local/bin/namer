@@ -62,7 +62,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Collection, Optional
 
 import typer
 
@@ -135,6 +135,9 @@ ICON_QUESTION = {
     "instructions": "Which icon's meaning best matches this tab name?",
     "criteria": {icon_id: meaning for icon_id, (_, meaning) in ICONS.items()},
 }
+# Picking a name's icon anew goes to the next likeliest of this many of
+# d1-2B's likeliest icons, then back to the likeliest
+REPICK_ICONS = 5
 PURPOSE_QUESTION = {
     "type": "noul",
     "instructions": "Has the user done something in this tab that shows what they "
@@ -384,22 +387,39 @@ def main(
 
 @app.command()
 def icon(
-    names: Annotated[list[str], typer.Argument(metavar="NAME...")],
+    names: Annotated[Optional[list[str]], typer.Argument(metavar="NAME...")] = None,
     refresh: Annotated[
         bool,
         typer.Option(
-            help="Have the model pick the names' icons anew rather than use cached ones."
+            help="Pick each name's icon anew, as the next likeliest after its "
+            "cached one, rather than use the cached one."
         ),
     ] = False,
+    forget: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            metavar="NAME",
+            help="Forget this name's cached icon first, so that it is picked anew "
+            "next time, such as a name a tab was renamed from.",
+        ),
+    ] = None,
 ) -> None:
     """Print an icon for each name, one per line in the same order."""
+    names = names or []
+    if forget:
+        update_cache({}, forget)
     icon_ids = read_cache()
     missing = [name for name in dict.fromkeys(names) if refresh or name not in icon_ids]
 
     if missing and llama_supported():
         try:
             with LlamaServer([D1]) as server:
-                picked = {name: d1_icon_id(server, name) for name in missing}
+                picked = {
+                    name: next_icon_id(
+                        d1_icon_ids(server, name), icon_ids.get(name) if refresh else None
+                    )
+                    for name in missing
+                }
         except LlamaError as e:
             print(f"Couldn't pick icons with d1-2B: {e}", file=sys.stderr)
             warn("llama")
@@ -1087,9 +1107,23 @@ def ask_d1(server: LlamaServer, state: str, question: dict) -> dict:
         raise LlamaError(f"d1-2B gave no answer: {response!r:.500}") from e
 
 
-def d1_icon_id(server: LlamaServer, name: str) -> str:
+def d1_icon_ids(server: LlamaServer, name: str) -> list[str]:
+    """The icons for name, likeliest first."""
     probabilities = ask_d1(server, f"Tab name: {name}", ICON_QUESTION)["probabilities"]
-    return max(probabilities, key=probabilities.get)
+    return sorted(probabilities, key=probabilities.get, reverse=True)
+
+
+def d1_icon_id(server: LlamaServer, name: str) -> str:
+    return d1_icon_ids(server, name)[0]
+
+
+def next_icon_id(icon_ids: list[str], current: str | None) -> str:
+    """The icon after current among the REPICK_ICONS likeliest, or the
+    likeliest if current isn't one of them."""
+    likeliest = icon_ids[:REPICK_ICONS]
+    if current in likeliest:
+        return likeliest[(likeliest.index(current) + 1) % len(likeliest)]
+    return likeliest[0]
 
 
 def d1_purpose(server: LlamaServer, context: str) -> float:
@@ -1134,14 +1168,16 @@ def read_cache() -> dict[str, str]:
     return {}
 
 
-def update_cache(icon_ids: dict[str, str]) -> None:
+def update_cache(icon_ids: dict[str, str], forget: Collection[str] = ()) -> None:
+    """Cache icon_ids, and remove the names in forget."""
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     # Stop concurrent runs from losing each other's picks
     with open(os.path.join(CACHE_DIR, ".lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
 
-        data = {"version": CACHE_VERSION, "icons": {**read_cache(), **icon_ids}}
+        icons = {k: v for k, v in read_cache().items() if k not in forget}
+        data = {"version": CACHE_VERSION, "icons": {**icons, **icon_ids}}
 
         fd, temp_path = tempfile.mkstemp(dir=CACHE_DIR, prefix=".icons-")
 

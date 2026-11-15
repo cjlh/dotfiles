@@ -510,10 +510,15 @@ class PickedIcons:
     a TabIcon. A tab's icon is picked again whenever it is renamed, or when
     name_tab.py asks for it to be, unless name_tab.py picked it along with the
     tab's name. Tabs waiting for an icon are picked together
-    in the background, one run at a time."""
+    in the background, one run at a time.
+
+    The names tabs are renamed from are forgotten by namer in its next run, so
+    that a tab renamed back to one gets an icon picked with namer's current
+    logic rather than its cached one."""
 
     def __init__(self) -> None:
         self.queue = []  # (tab id, TabIcon) waiting for the next run, oldest first
+        self.forget = set()  # names for namer to forget in the next run
         self.running = False
 
     def icon(self, tab) -> str:
@@ -521,6 +526,8 @@ class PickedIcons:
         refresh = getattr(tab, REPICK_ICON_ATTR, False)
 
         if tab_icon is None or tab_icon.name != tab.name or refresh:
+            if tab_icon is not None and tab_icon.name != tab.name:
+                self.forget.add(tab_icon.name)
             if refresh:
                 delattr(tab, REPICK_ICON_ATTR)
             if isinstance(refresh, tuple):
@@ -529,6 +536,8 @@ class PickedIcons:
                 if name == tab.name and wcswidth(icon) == 1:
                     tab_icon = TabIcon(tab.name, is_loading=False, icon=icon)
                     setattr(tab, TAB_ICON_ATTR, tab_icon)
+                    if self.forget:
+                        add_timer(self._run, 0, False)
                     return icon
                 # Renamed since, which tabs whose status tag hides their icon
                 # can be before it is ever drawn
@@ -554,16 +563,17 @@ class PickedIcons:
             for tab_id, tab_icon in self.queue
             if getattr(boss.tab_for_id(tab_id), TAB_ICON_ATTR, None) is tab_icon
         ]
-        if not self.queue:
+        if not self.queue and not self.forget:
             return
 
         # namer refreshes every name in a run or none of them.
-        refresh = self.queue[0][1].refresh
+        refresh = bool(self.queue) and self.queue[0][1].refresh
         picking = [
             tab_icon for _, tab_icon in self.queue if tab_icon.refresh == refresh
         ]
         self.queue = [item for item in self.queue if item[1].refresh != refresh]
         names = list(dict.fromkeys(tab_icon.name for tab_icon in picking))
+        forget, self.forget = sorted(self.forget), set()
         self.running = True
         temp_path = None
 
@@ -576,7 +586,7 @@ class PickedIcons:
             self._run()
 
         def done(exit_code: int | None) -> None:
-            icons = {}
+            icons = None
             try:
                 if exit_code == 0:
                     with open(temp_path, encoding="utf-8") as f:
@@ -586,19 +596,26 @@ class PickedIcons:
                         wcswidth(line) == 1 for line in lines
                     ):
                         icons = dict(zip(names, lines))
-                if not icons:
+                if icons is None:
                     log_error(f"tab_bar.py: namer failed with exit code {exit_code}")
             except OSError:
                 pass
             finally:
                 _unlink(temp_path)
-            finish(icons)
+            finish(icons or {})
 
         try:
             fd, temp_path = tempfile.mkstemp(prefix="kitty-namer-")
             os.close(fd)
             _run_monitored(
-                [NAMER, "icon", *(["--refresh"] if refresh else []), "--", *names],
+                [
+                    NAMER,
+                    "icon",
+                    *(["--refresh"] if refresh else []),
+                    *(f"--forget={name}" for name in forget),
+                    "--",
+                    *names,
+                ],
                 temp_path,
                 NAMER_TIMEOUT,
                 done,
@@ -680,7 +697,8 @@ class Spinner:
 def _hand_over_icons(old: PickedIcons, new: PickedIcons) -> None:
     # A run of the old one in progress still finishes, updating its tabs.
     new.queue, old.queue = getattr(old, "queue", []), []
-    if new.queue:
+    new.forget, old.forget = getattr(old, "forget", set()), set()
+    if new.queue or new.forget:
         add_timer(new._run, 0, False)
 
 
