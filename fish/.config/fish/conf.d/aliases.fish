@@ -28,5 +28,7 @@ abbr gcm "git commit -m"
 abbr gca "git commit --amend"
 
 abbr gf "nvim +Flog"
+abbr lzg "lazygit"
+abbr lzd "lazydocker"
 
 abbr jj "just --unstable"

@@ -18,7 +18,7 @@ To install apps and link configs:
 
 ```sh
 # Packages used by tools and commands
-brew install uv brew install oven-sh/bun/bun
+brew install uv oven-sh/bun/bun lazydocker lazygit ripgrep
 
 # Utility scripts - `~/.local/bin/` must be on `PATH`
 stow scripts
@@ -32,7 +32,7 @@ mkdir -p ~/.claude/skills  # avoid symlinking entire skills directory
 stow skills
 
 # Neovim (https://github.com/neovim/neovim)
-brew install neovim ripgrep fd tree-sitter tree-sitter-cli
+brew install neovim fd tree-sitter tree-sitter-cli
 stow neovim
 
 # nvimpager (https://github.com/lucc/nvimpager)
