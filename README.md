@@ -46,6 +46,8 @@ git config --global include.path ~/.gitconfig.d/shared
 # Kitty terminal (https://github.com/kovidgoyal/kitty)
 brew install --cask kitty
 stow kitty
+# Copy and update local status indicator providers as desired
+cp kitty/.config/kitty/status_providers{.example,}.toml
 
 # Fish shell (https://github.com/fish-shell/fish-shell)
 brew install fish

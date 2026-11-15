@@ -1,8 +1,9 @@
 # Custom tab bar that displays status items in the far right corner, by
-# default available disk space, Codex and Claude Code usage. The items are
-# listed in status_providers.toml, or status_providers.local.toml if it
-# exists, which also documents how to add one: besides disk space, which is
-# sampled every redraw interval, each is a command printing JSON. All providers
+# by default just available disk space. The items are listed in
+# status_providers.toml, if it exists, a copy of status_providers.example.toml
+# which documents how to add one and adds Codex and Claude Code usage: besides
+# disk space, which is sampled every redraw interval, each is a command
+# printing JSON. All providers
 # read JSON caches in ~/.cache/kitty-tab-bar and refresh them concurrently in
 # the background.
 #
@@ -57,13 +58,10 @@ from kitty.tab_bar import (
 )
 from kitty.utils import log_error
 
-# Status items to show, the first of these files that exists. See the latter.
-PROVIDERS_PATHS = tuple(
-    os.path.join(config_dir, name)
-    for name in ("status_providers.local.toml", "status_providers.toml")
-)
+# Optional config file defining status items to show. See status_providers.example.toml.
+PROVIDERS_PATH = os.path.join(config_dir, "status_providers.toml")
 PROVIDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
-# Defaults of a provider's keys in PROVIDERS_PATHS
+# Defaults of a provider's keys in PROVIDERS_PATH
 COMMAND_REFRESH_INTERVAL = 180  # seconds between runs of its command
 COMMAND_TIMEOUT = 60  # seconds before a run of its command is killed
 # Percentage of an agent's weekly limit from which it is shown
@@ -354,7 +352,7 @@ class DiskProvider(StatusProvider):
 
 class CommandProvider(StatusProvider):
     """A status item whose data is printed as JSON by a command, as listed in
-    PROVIDERS_PATHS. Subclasses are the formats the data can be in."""
+    PROVIDERS_PATH. Subclasses are the formats the data can be in."""
 
     def __init__(
         self,
@@ -451,7 +449,7 @@ COMMAND_PROVIDERS = {"text": TextProvider, "usage": UsageProvider}
 
 
 def _create_provider(spec) -> StatusProvider:
-    """The provider described by spec, a [[provider]] of PROVIDERS_PATHS."""
+    """The provider described by spec, a [[provider]] of PROVIDERS_PATH."""
     spec = dict(spec)
     name = spec.pop("name")
     if not isinstance(name, str) or not PROVIDER_NAME.fullmatch(name):
@@ -468,9 +466,12 @@ def _create_provider(spec) -> StatusProvider:
 
 
 def _load_providers() -> tuple[StatusProvider, ...]:
-    """The providers listed in the first of PROVIDERS_PATHS that exists.
-    Mistakes are logged, and only cost the providers they are in."""
-    path = next((p for p in PROVIDERS_PATHS if os.path.exists(p)), PROVIDERS_PATHS[-1])
+    """The providers listed in PROVIDERS_PATH, or just disk space if it
+    doesn't exist. Mistakes are logged, and only cost the providers they are
+    in."""
+    path = PROVIDERS_PATH
+    if not os.path.exists(path):
+        return (DiskProvider(),)
     try:
         with open(path, "rb") as f:
             specs = tomllib.load(f)["provider"]

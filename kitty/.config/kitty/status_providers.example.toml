@@ -1,11 +1,11 @@
 # Status items shown at the right of the tab bar by tab_bar.py, in order.
 #
-# If status_providers.local.toml exists next to this file it is read instead,
-# so that a machine (or branch) can show other items without changing this
-# file. Changes take effect when kitty's config is reloaded.
+# Copy this file to status_providers.toml and modify as desired. Changes take effect when
+# kitty's config is reloaded.
 #
-# Each [[provider]] has a unique name, of letters, digits, "-" and "_". The
-# name "disk" is the built-in available disk space, which takes no other keys.
+# Each [[provider]] has a unique name, of letters, digits, "-" and "_". The name "disk"
+# is the built-in available disk space, which takes no other keys.
+#
 # Any other provider takes:
 #
 #   command   Program and arguments printing the item's data as JSON, required.
