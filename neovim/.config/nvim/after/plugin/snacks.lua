@@ -99,7 +99,7 @@ end
 
 vim.api.nvim_create_user_command('Explorer', toggle_explorer, { desc = 'Toggle the Snacks explorer' })
 
-vim.keymap.set('n', '<leader>e', toggle_explorer, { desc = 'Toggle explorer (Snacks)' })
+vim.keymap.set('n', '<leader>rx', toggle_explorer, { desc = 'Toggle explorer (Snacks)' })
 
 local function toggle_terminal()
     Snacks.terminal.toggle()

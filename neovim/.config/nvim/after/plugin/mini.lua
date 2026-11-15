@@ -1,4 +1,23 @@
--- https://github.com/nvim-mini/mini.nvim/blob/e7538b549361c9ac8416a07b0223ce03c508bfe7/readmes/mini-completion.md
+-- https://github.com/nvim-mini/mini.nvim/blob/main/readmes/mini-files.md
+require('mini.files').setup {
+    windows = { preview = true, width_preview = 50 },
+}
+
+vim.keymap.set('n', '<leader>e', function()
+    -- close() returns a falsy value when no explorer is open
+    if not MiniFiles.close() then
+        MiniFiles.open()
+    end
+end, { desc = 'Toggle mini.files' })
+
+vim.api.nvim_create_autocmd('User', {
+    pattern = 'MiniFilesBufferCreate',
+    desc = 'Close mini.files with <Esc>',
+    group = vim.api.nvim_create_augroup('user_mini_files', {}),
+    callback = function(args)
+        vim.keymap.set('n', '<Esc>', MiniFiles.close, { buffer = args.data.buf_id, desc = 'Close mini.files' })
+    end,
+})
 
 -- LSP completion (built-in completion is opt-in and left disabled)
 require('mini.completion').setup {}
