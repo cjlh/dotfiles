@@ -2,7 +2,7 @@
 #
 # Turns the active window into a dock at the left of the tab and opens a new
 # window next to it in the stack layout, so that the docked window stays visible
-# while the windows on the right are leafed through. Pairs with stack_bar.py.
+# while the windows on the right are leafed through.
 #
 # When the last window next to the dock is closed, the docked window becomes a
 # normal window again and the tab goes back to its previous layout, instead of
@@ -115,7 +115,7 @@ def _undock_if_last_normal_window(tab: Tab, window: Window) -> None:
         or len(wl.groups) > 1
     ):
         return
-    # Not focusable docks, such as the stack bar, are left to be closed
+    # Not focusable docks are left to be closed
     dock = next(
         (
             g

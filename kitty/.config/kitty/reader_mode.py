@@ -9,8 +9,7 @@
 # to the stack take it on from the others.
 #
 # While the window is the only one visible in the active tab (or the active
-# window of the stack layout), the tab bar and the bar of stack_bar.py are
-# kept to the same column.
+# window of the stack layout), the tab bar is kept to the same column.
 #
 # The watcher keeps the column centred when the OS window is resized, the font
 # size changes, or windows are opened, closed or moved. Windows narrower than
@@ -46,9 +45,8 @@ COLUMNS_VAR = "reader_mode"
 # Set on windows padded by this module, to restore their padding when reader
 # mode is turned off
 PADDED_ATTR = "_reader_mode_padded"
-# Must match stack_bar.py
 STACK_LAYOUT = "stack"
-STACK_BAR_VAR = "stack_bar"
+# Must match tab_bar.py
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
 # Spare pixels left over when padding, so that rounding the padding when it is
 # converted from pts to pixels never loses a column
@@ -64,10 +62,6 @@ def _columns(window: Window | None) -> int | None:
         return int(window.user_vars[COLUMNS_VAR]) if window is not None else None
     except (KeyError, ValueError):
         return None
-
-
-def _is_stack_bar(window: Window) -> bool:
-    return bool(window.user_vars.get(STACK_BAR_VAR))
 
 
 def _side_padding_pt(window: Window, columns: int) -> float | None:
@@ -116,11 +110,11 @@ def _centred_columns(tab: Tab | None) -> int | None:
         return None
     if not tab.has_single_window_visible():
         return None
-    # Docks (kitty >= 0.50.0) other than the stack bar, such as from dock_window.py
+    # Docks (kitty >= 0.50.0), such as from dock_window.py
     iter_docks = getattr(tab.windows, "iter_dock_groups", None)
     if iter_docks is not None:
         for group in iter_docks(only_visible=True):
-            if any(w is not window and not _is_stack_bar(w) for w in group):
+            if any(w is not window for w in group):
                 return None
     return columns
 
@@ -132,7 +126,7 @@ def _stack(tab: Tab | None) -> list[Window]:
     return [
         g.windows[0]
         for g in tab.windows.iter_all_layoutable_groups()
-        if g.windows and not _is_stack_bar(g.windows[0])
+        if g.windows
     ]
 
 
@@ -151,20 +145,11 @@ def _sync_stack(tab: Tab) -> None:
 def _update_windows(tab: Tab) -> None:
     _sync_stack(tab)
     changed = False
-    bars = []
     for window in tab:
-        if _is_stack_bar(window):
-            bars.append(window)
-        elif (columns := _columns(window)) is not None:
+        if (columns := _columns(window)) is not None:
             changed |= _set_side_padding(window, _side_padding_pt(window, columns))
         elif getattr(window, PADDED_ATTR, False):
             changed |= _set_side_padding(window, None)
-    # The stack bar follows the active window, once it has been padded. Its
-    # padding is always managed here, as it may be restored from a session.
-    bar_columns = _centred_columns(tab)
-    for window in bars:
-        pt = _side_padding_pt(window, bar_columns) if bar_columns is not None else None
-        changed |= _set_side_padding(window, pt)
     if changed:
         tab.relayout()
 
@@ -221,7 +206,7 @@ def handle_result(
 ) -> None:
     window = boss.window_id_map.get(target_window_id)
     tm = boss.os_window_map.get(window.os_window_id) if window is not None else None
-    if tm is None or _is_stack_bar(window):
+    if tm is None:
         return
     try:
         columns = int(args[1]) if len(args) > 1 else DEFAULT_COLUMNS

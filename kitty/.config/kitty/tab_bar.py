@@ -20,6 +20,9 @@
 # set DRAW_ONLY_ATTR so that watchers can skip their work, see
 # _mark_tab_bar_dirty.
 #
+# Tabs in the stack layout with more than one window show a circle per window
+# after their title, filled in for the active one, see STACK_DOTS.
+#
 # kitty runs this file again when its config is reloaded, see _shared. It draws
 # with the copy loaded by the previous reload though, as it only forgets that
 # copy after applying the reloaded config, so edits here take two reloads.
@@ -133,10 +136,15 @@ TAB_ICON_ATTR = "tab_bar_icon"
 SPINNER_FRAMES = "⠦⠖⠲⠴"
 SPINNER_INTERVAL = 0.12  # seconds
 
+# Appended to the titles of tabs in the stack layout, one per window, the
+# second for the active window
+STACK_DOTS = ("○", "●")
+STACK_LAYOUT = "stack"
+
 # Set on a tab manager while its tab bar is marked dirty only to be redrawn,
 # with nothing about its tabs or windows changed. on_tab_bar_dirty is called
 # synchronously, so watchers that only care about changes return early while it
-# is set. Must match stack_bar.py, and any new watcher with
+# is set. Must match reader_mode.py, and any new watcher with
 # an on_tab_bar_dirty handler should check it too.
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
@@ -902,26 +910,46 @@ def _tab_title(tab: TabBarData) -> str:
     return f"{spinner} {short}" if spinner else short
 
 
+def _stack_dots(tab: TabBarData) -> str:
+    """A circle per window of tab when it is in the stack layout with more than
+    one window, filled in for the active one."""
+    t = get_boss().tab_for_id(tab.tab_id)
+
+    # Groups are the normal windows with their overlays, without docks
+    if t is None or t.current_layout.name != STACK_LAYOUT or len(t.windows.groups) < 2:
+        return ""
+
+    active = t.windows.active_group_idx
+    return " " + "".join(
+        STACK_DOTS[i == active] for i in range(len(t.windows.groups))
+    )
+
+
 def _fit_title(
-    draw_data: DrawData, tab: TabBarData, index: int, max_tab_length: int
+    draw_data: DrawData,
+    tab: TabBarData,
+    index: int,
+    max_tab_length: int,
+    suffix: str = "",
 ) -> TabBarData:
-    """tab with its title shortened to an ellipsis, so that the whole tab fits
-    in max_tab_length cells. Otherwise kitty draws its own ellipsis over the
-    last cell of the tab, cutting off whatever the title template draws after
-    the title."""
+    """tab with suffix appended to its title, shortened to an ellipsis before
+    suffix, so that the whole tab fits in max_tab_length cells. Otherwise kitty
+    draws its own ellipsis over the last cell of the tab, cutting off suffix and
+    whatever the title template draws after the title."""
     template = apply_title_template(draw_data, tab._replace(title=""), index)
     room = (
         max_tab_length
         - wcswidth(SGR_ESCAPE.sub("", template))
         - draw_data.leading_spaces
         - min(max_tab_length - 1, draw_data.trailing_spaces)
+        - wcswidth(suffix)
     )
 
     # Without room for a character and the ellipsis, leave it to kitty
-    if room < 2 or wcswidth(tab.title) <= room:
-        return tab
+    if room >= 2 and wcswidth(tab.title) > room:
+        tab = tab._replace(title=truncate_line(tab.title, room))
 
-    return tab._replace(title=truncate_line(tab.title, room))
+    return tab._replace(title=tab.title + suffix)
 
 
 def draw_tab(
@@ -945,7 +973,7 @@ def draw_tab(
         room = screen.columns - before - (wcswidth(text) + 1 if text else 0)
         max_title_length = max(max_title_length, room)
 
-    tab = _fit_title(draw_data, tab, index, max_title_length)
+    tab = _fit_title(draw_data, tab, index, max_title_length, _stack_dots(tab))
 
     end = draw_tab_with_separator(
         draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
