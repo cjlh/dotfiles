@@ -3,7 +3,21 @@
 #
 # Copy this file to tab_bar.toml and modify as desired. Changes take effect when
 # kitty's config is reloaded.
+
+[tabs]
+# When windows are stacked, the parent tab contains an overview of their status
 #
+# Examples (inactive, active, separator):
+#   Small squares:   "▫", "▪", ""
+#   Medium squares:  "◻", "◼", ""
+#   Rounded squares: "▢", "■", " "
+#   Circles:         "○", "●", " "
+#   Bullets:         "◦", "•", ""
+#   Custom text:     "<>", "[active]", " | "
+inactive-stacked-window-indicator = "▫"
+active-stacked-window-indicator = "▪"
+stacked-window-indicator-separator = ""
+
 # Arbitrary status providers can be configured using the provider list. Each [[provider]]
 # entry has a unique name, of letters, digits, "-" and "_". The name "disk" is the
 # built-in available disk space indicator, which takes no other keys.
@@ -26,17 +40,6 @@
 #   interval  Seconds between runs of command, default 180.
 #   timeout   Seconds before a run of command is killed, default 60.
 #   weekly_threshold  See the "usage" format, default 0.
-
-# Stack markers for inactive/active windows:
-#   small-square   ▫▪     no spaces (default)
-#   medium-square  ◻◼     no spaces
-#   rounded-square ▢ ■    one space
-#   circles        ○ ●    one space
-#   bullets        ◦•     no spaces
-# With no [tabs] table, small-square is used. With no [[provider]] entries,
-# disk space is shown. To hide all providers, put provider = [] before [tabs].
-[tabs]
-stack-indicator = "small-square"
 
 [[provider]]
 name = "disk"

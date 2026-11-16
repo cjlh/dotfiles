@@ -28,8 +28,6 @@
 # copy after applying the reloaded config, so edits here take two reloads.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
-from abc import ABC, abstractmethod
-
 import json
 import os
 import re
@@ -148,55 +146,18 @@ STACK_LAYOUT = "stack"
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
 
-class StackIndicator(ABC):
-    """A stack's window markers, with style-specific glyphs and spacing."""
+@dataclass(frozen=True)
+class StackIndicator:
+    """Custom strings for a stack's inactive and active window markers."""
 
-    @property
-    @abstractmethod
-    def glyphs(self) -> tuple[str, str]:
-        """Inactive and active window glyphs."""
-
-    @property
-    @abstractmethod
-    def spacing(self) -> int:
-        """Number of spaces between markers."""
+    inactive: str = "▫"
+    active: str = "▪"
+    separator: str = ""
 
     def render(self, count: int, active: int) -> str:
-        return (" " * self.spacing).join(self.glyphs[i == active] for i in range(count))
-
-
-class SmallSquareIndicator(StackIndicator):
-    glyphs = ("▫", "▪")
-    spacing = 0
-
-
-class MediumSquareIndicator(StackIndicator):
-    glyphs = ("◻", "◼")
-    spacing = 0
-
-
-class RoundedSquareIndicator(StackIndicator):
-    glyphs = ("▢", "■")
-    spacing = 1
-
-
-class CirclesIndicator(StackIndicator):
-    glyphs = ("○", "●")
-    spacing = 1
-
-
-class BulletsIndicator(StackIndicator):
-    glyphs = ("◦", "•")
-    spacing = 0
-
-
-STACK_INDICATORS = {
-    "small-square": SmallSquareIndicator,
-    "medium-square": MediumSquareIndicator,
-    "rounded-square": RoundedSquareIndicator,
-    "circles": CirclesIndicator,
-    "bullets": BulletsIndicator,
-}
+        return self.separator.join(
+            self.active if i == active else self.inactive for i in range(count)
+        )
 
 
 def _load_config() -> dict:
@@ -219,13 +180,20 @@ def _load_stack_indicator() -> StackIndicator:
         tabs = _config().get("tabs", {})
         if not isinstance(tabs, dict):
             raise TypeError("tabs must be a table")
-        name = tabs.get("stack-indicator", "small-square")
-        if not isinstance(name, str) or name not in STACK_INDICATORS:
-            raise ValueError(f"unknown stack-indicator {name!r}")
-        return STACK_INDICATORS[name]()
+        values = {}
+        for field, key in (
+            ("inactive", "inactive-stacked-window-indicator"),
+            ("active", "active-stacked-window-indicator"),
+            ("separator", "stacked-window-indicator-separator"),
+        ):
+            if key in tabs:
+                if not isinstance(tabs[key], str):
+                    raise TypeError(f"{key} must be a string")
+                values[field] = tabs[key]
+        return StackIndicator(**values)
     except (TypeError, ValueError) as e:
         log_error(f"tab_bar.py: invalid tabs settings in {CONFIG_PATH}: {e!r}")
-        return SmallSquareIndicator()
+        return StackIndicator()
 
 
 def _stack_indicator() -> StackIndicator:
@@ -1000,7 +968,8 @@ def _stack_suffix(tab: TabBarData) -> str:
         return ""
 
     active = t.windows.active_group_idx
-    return " " + _stack_indicator().render(len(t.windows.groups), active)
+    markers = _stack_indicator().render(len(t.windows.groups), active)
+    return " " + markers if markers else ""
 
 
 def _fit_title(
