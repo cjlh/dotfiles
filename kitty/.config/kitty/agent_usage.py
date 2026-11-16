@@ -2,7 +2,7 @@
 #
 # Prints how much of a coding agent's subscription limits have been used, for
 # the "usage" format of tab_bar.py's status items, see
-# status_providers.example.toml. It is run with kitty's own Python:
+# tab_bar.example.toml. It is run with kitty's own Python:
 #
 #   kitty +launch agent_usage.py claude|codex
 #

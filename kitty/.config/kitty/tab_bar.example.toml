@@ -1,10 +1,12 @@
-# Status items shown at the right of the tab bar by tab_bar.py, in order.
+# Per-machine tab bar settings for tab_bar.py.
+# Status items appear at the right of the tab bar in the order listed.
 #
-# Copy this file to status_providers.toml and modify as desired. Changes take effect when
+# Copy this file to tab_bar.toml and modify as desired. Changes take effect when
 # kitty's config is reloaded.
 #
-# Each [[provider]] has a unique name, of letters, digits, "-" and "_". The name "disk"
-# is the built-in available disk space, which takes no other keys.
+# Arbitrary status providers can be configured using the provider list. Each [[provider]]
+# entry has a unique name, of letters, digits, "-" and "_". The name "disk" is the
+# built-in available disk space indicator, which takes no other keys.
 #
 # Any other provider takes:
 #
@@ -15,15 +17,26 @@
 #             "text" (default)  {"text": "12 EUR"}
 #             "usage"           {"session": {"percent": 27.0, "resets_at": 1794595800},
 #                                "weekly": {"percent": 6.0, "resets_at": null}}
-#                               shown as "27%", or "27% (60%)" once the weekly
-#                               percentage reaches weekly_threshold. Each
+#                               shown as "27/6" (session/weekly), with weekly
+#                               shown once it reaches weekly_threshold. Each
 #                               resets_at is in seconds since the epoch, after
 #                               which that percentage is taken to be 0.
 #             Either way, data of null hides the item.
 #   icon      Shown before the data, default none.
 #   interval  Seconds between runs of command, default 180.
 #   timeout   Seconds before a run of command is killed, default 60.
-#   weekly_threshold  See the "usage" format, default 50.
+#   weekly_threshold  See the "usage" format, default 0.
+
+# Stack markers for inactive/active windows:
+#   small-square   ▫▪     no spaces (default)
+#   medium-square  ◻◼     no spaces
+#   rounded-square ▢ ■    one space
+#   circles        ○ ●    one space
+#   bullets        ◦•     no spaces
+# With no [tabs] table, small-square is used. With no [[provider]] entries,
+# disk space is shown. To hide all providers, put provider = [] before [tabs].
+[tabs]
+stack-indicator = "small-square"
 
 [[provider]]
 name = "disk"

@@ -1,6 +1,6 @@
 # Custom tab bar that displays status items in the far right corner, by
 # by default just available disk space. The items are listed in
-# status_providers.toml, if it exists, a copy of status_providers.example.toml
+# tab_bar.toml, if it exists, a copy of tab_bar.example.toml
 # which documents how to add one and adds Codex and Claude Code usage: besides
 # disk space, which is sampled every redraw interval, each is a command
 # printing JSON. All providers
@@ -20,13 +20,15 @@
 # set DRAW_ONLY_ATTR so that watchers can skip their work, see
 # _mark_tab_bar_dirty.
 #
-# Tabs in the stack layout with more than one window show a circle per window
-# after their title, filled in for the active one, see STACK_DOTS.
+# Tabs in the stack layout with more than one window show an indicator per
+# window after their title. Choose its style in tab_bar.toml under [tabs].
 #
 # kitty runs this file again when its config is reloaded, see _shared. It draws
 # with the copy loaded by the previous reload though, as it only forgets that
 # copy after applying the reloaded config, so edits here take two reloads.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
+
+from abc import ABC, abstractmethod
 
 import json
 import os
@@ -61,10 +63,10 @@ from kitty.tab_bar import (
 )
 from kitty.utils import log_error
 
-# Optional config file defining status items to show. See status_providers.example.toml.
-PROVIDERS_PATH = os.path.join(config_dir, "status_providers.toml")
+# Optional per-machine tab bar settings. See tab_bar.example.toml.
+CONFIG_PATH = os.path.join(config_dir, "tab_bar.toml")
 PROVIDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
-# Defaults of a provider's keys in PROVIDERS_PATH
+# Defaults of a provider's keys in CONFIG_PATH
 COMMAND_REFRESH_INTERVAL = 180  # seconds between runs of its command
 COMMAND_TIMEOUT = 60  # seconds before a run of its command is killed
 # Percentage of an agent's weekly limit from which it is shown
@@ -136,9 +138,6 @@ TAB_ICON_ATTR = "tab_bar_icon"
 SPINNER_FRAMES = "⠦⠖⠲⠴"
 SPINNER_INTERVAL = 0.12  # seconds
 
-# Appended to the titles of tabs in the stack layout, one per window, the
-# second for the active window
-STACK_DOTS = ("○", "●")
 STACK_LAYOUT = "stack"
 
 # Set on a tab manager while its tab bar is marked dirty only to be redrawn,
@@ -147,6 +146,90 @@ STACK_LAYOUT = "stack"
 # is set. Must match reader_mode.py, and any new watcher with
 # an on_tab_bar_dirty handler should check it too.
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
+
+
+class StackIndicator(ABC):
+    """A stack's window markers, with style-specific glyphs and spacing."""
+
+    @property
+    @abstractmethod
+    def glyphs(self) -> tuple[str, str]:
+        """Inactive and active window glyphs."""
+
+    @property
+    @abstractmethod
+    def spacing(self) -> int:
+        """Number of spaces between markers."""
+
+    def render(self, count: int, active: int) -> str:
+        return (" " * self.spacing).join(self.glyphs[i == active] for i in range(count))
+
+
+class SmallSquareIndicator(StackIndicator):
+    glyphs = ("▫", "▪")
+    spacing = 0
+
+
+class MediumSquareIndicator(StackIndicator):
+    glyphs = ("◻", "◼")
+    spacing = 0
+
+
+class RoundedSquareIndicator(StackIndicator):
+    glyphs = ("▢", "■")
+    spacing = 1
+
+
+class CirclesIndicator(StackIndicator):
+    glyphs = ("○", "●")
+    spacing = 1
+
+
+class BulletsIndicator(StackIndicator):
+    glyphs = ("◦", "•")
+    spacing = 0
+
+
+STACK_INDICATORS = {
+    "small-square": SmallSquareIndicator,
+    "medium-square": MediumSquareIndicator,
+    "rounded-square": RoundedSquareIndicator,
+    "circles": CirclesIndicator,
+    "bullets": BulletsIndicator,
+}
+
+
+def _load_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        log_error(f"tab_bar.py: failed to read {CONFIG_PATH}: {e!r}")
+        return {}
+
+
+def _config() -> dict:
+    return _shared("config", _load_config)
+
+
+def _load_stack_indicator() -> StackIndicator:
+    try:
+        tabs = _config().get("tabs", {})
+        if not isinstance(tabs, dict):
+            raise TypeError("tabs must be a table")
+        name = tabs.get("stack-indicator", "small-square")
+        if not isinstance(name, str) or name not in STACK_INDICATORS:
+            raise ValueError(f"unknown stack-indicator {name!r}")
+        return STACK_INDICATORS[name]()
+    except (TypeError, ValueError) as e:
+        log_error(f"tab_bar.py: invalid tabs settings in {CONFIG_PATH}: {e!r}")
+        return SmallSquareIndicator()
+
+
+def _stack_indicator() -> StackIndicator:
+    return _shared("stack_indicator", _load_stack_indicator)
 
 
 def _statvfs_capacity(path: str) -> int:
@@ -363,7 +446,7 @@ class DiskProvider(StatusProvider):
 
 class CommandProvider(StatusProvider):
     """A status item whose data is printed as JSON by a command, as listed in
-    PROVIDERS_PATH. Subclasses are the formats the data can be in."""
+    CONFIG_PATH. Subclasses are the formats the data can be in."""
 
     def __init__(
         self,
@@ -460,7 +543,7 @@ COMMAND_PROVIDERS = {"text": TextProvider, "usage": UsageProvider}
 
 
 def _create_provider(spec) -> StatusProvider:
-    """The provider described by spec, a [[provider]] of PROVIDERS_PATH."""
+    """The provider described by spec, a [[provider]] of CONFIG_PATH."""
     spec = dict(spec)
     name = spec.pop("name")
     if not isinstance(name, str) or not PROVIDER_NAME.fullmatch(name):
@@ -477,15 +560,13 @@ def _create_provider(spec) -> StatusProvider:
 
 
 def _load_providers() -> tuple[StatusProvider, ...]:
-    """The providers listed in PROVIDERS_PATH, or just disk space if it
-    doesn't exist. Mistakes are logged, and only cost the providers they are
-    in."""
-    path = PROVIDERS_PATH
+    """Configured providers, defaulting to disk space when omitted.
+    Mistakes are logged, and only cost the providers they are in."""
+    path = CONFIG_PATH
     if not os.path.exists(path):
         return (DiskProvider(),)
     try:
-        with open(path, "rb") as f:
-            specs = tomllib.load(f)["provider"]
+        specs = _config().get("provider", [{"name": "disk"}])
         if not isinstance(specs, list):
             raise TypeError("provider must be an array of tables")
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -910,9 +991,8 @@ def _tab_title(tab: TabBarData) -> str:
     return f"{spinner} {short}" if spinner else short
 
 
-def _stack_dots(tab: TabBarData) -> str:
-    """A circle per window of tab when it is in the stack layout with more than
-    one window, filled in for the active one."""
+def _stack_suffix(tab: TabBarData) -> str:
+    """Markers for normal window groups in a stack, including the active one."""
     t = get_boss().tab_for_id(tab.tab_id)
 
     # Groups are the normal windows with their overlays, without docks
@@ -920,9 +1000,7 @@ def _stack_dots(tab: TabBarData) -> str:
         return ""
 
     active = t.windows.active_group_idx
-    return " " + "".join(
-        STACK_DOTS[i == active] for i in range(len(t.windows.groups))
-    )
+    return " " + _stack_indicator().render(len(t.windows.groups), active)
 
 
 def _fit_title(
@@ -973,7 +1051,7 @@ def draw_tab(
         room = screen.columns - before - (wcswidth(text) + 1 if text else 0)
         max_title_length = max(max_title_length, room)
 
-    tab = _fit_title(draw_data, tab, index, max_title_length, _stack_dots(tab))
+    tab = _fit_title(draw_data, tab, index, max_title_length, _stack_suffix(tab))
 
     end = draw_tab_with_separator(
         draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
