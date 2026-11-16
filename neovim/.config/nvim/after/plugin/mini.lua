@@ -1,30 +1,72 @@
+-- Hide hidden directories, but keep hidden files
+local function hide_hidden_dirs(fs_entry)
+    return not (fs_entry.fs_type == 'directory' and vim.startswith(fs_entry.name, '.'))
+end
+
+local function show_all()
+    return true
+end
+
 -- https://github.com/nvim-mini/mini.nvim/blob/main/readmes/mini-files.md
 require('mini.files').setup {
     windows = { preview = true, width_preview = 50 },
-    content = {
-        -- Hide hidden directories, but keep hidden files
-        filter = function(fs_entry)
-            return not (fs_entry.fs_type == 'directory' and vim.startswith(fs_entry.name, '.'))
-        end,
-    },
+    content = { filter = hide_hidden_dirs },
 }
 
-vim.keymap.set('n', '<leader>e', function()
-    -- close() returns a falsy value when no explorer is open
-    if not MiniFiles.close() then
+-- mini.files doesn't expose the options of the open explorer, so track which filter it uses here
+local showing_hidden_dirs = false
+
+-- Open the explorer, or close it if it is already open with the same filter. If it is open with
+-- the other filter, switch filters in place so the explorer keeps its directory and cursor.
+---@param show_hidden_dirs boolean
+local function toggle_mini_files(show_hidden_dirs)
+    local opts = { content = { filter = show_hidden_dirs and show_all or hide_hidden_dirs } }
+
+    if MiniFiles.get_explorer_state() == nil then
         local buf_name = vim.api.nvim_buf_get_name(0)
         local path = vim.fn.filereadable(buf_name) == 1 and buf_name or vim.fn.getcwd()
-        MiniFiles.open(path)
+        MiniFiles.open(path, true, opts)
         MiniFiles.reveal_cwd()
+    elseif showing_hidden_dirs == show_hidden_dirs then
+        MiniFiles.close()
+        return
+    else
+        MiniFiles.refresh(opts)
     end
+
+    showing_hidden_dirs = show_hidden_dirs
+end
+
+vim.keymap.set('n', '<leader>e', function()
+    toggle_mini_files(false)
 end, { desc = 'Toggle mini.files' })
+
+vim.keymap.set('n', '<leader>E', function()
+    toggle_mini_files(true)
+end, { desc = 'Toggle mini.files (show hidden directories)' })
+
+local mini_files_group = vim.api.nvim_create_augroup('user_mini_files', {})
+
+vim.api.nvim_create_autocmd('User', {
+    pattern = 'MiniFilesExplorerClose',
+    desc = 'Reset hidden directory tracking, since explorers opened by other means use the default filter',
+    group = mini_files_group,
+    callback = function()
+        showing_hidden_dirs = false
+    end,
+})
 
 vim.api.nvim_create_autocmd('User', {
     pattern = 'MiniFilesBufferCreate',
-    desc = 'Close mini.files with <Esc>',
-    group = vim.api.nvim_create_augroup('user_mini_files', {}),
+    desc = 'Add mini.files buffer mappings for <Esc> and <CR>',
+    group = mini_files_group,
     callback = function(args)
-        vim.keymap.set('n', '<Esc>', MiniFiles.close, { buffer = args.data.buf_id, desc = 'Close mini.files' })
+        local buf_id = args.data.buf_id
+        vim.keymap.set('n', '<Esc>', MiniFiles.close, { buffer = buf_id, desc = 'Close mini.files' })
+        -- Same as the default `L`: open a file and close the explorer, or enter a directory
+        vim.keymap.set('n', '<CR>', function()
+            MiniFiles.go_in { close_on_file = true }
+        end, { buffer = buf_id, desc = 'Open file and close mini.files' })
     end,
 })
 
