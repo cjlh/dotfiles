@@ -71,7 +71,10 @@ DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
 # When this copy of the module was loaded, see _shared
 LOADED_AT = time.monotonic()
-CACHE_DIR = os.path.expanduser("~/.cache/kitty-tab-bar")
+# Test instances keep their own cache, see the kitty-config-testing skill
+CACHE_DIR = os.environ.get("KITTY_TAB_BAR_CACHE_DIR") or os.path.expanduser(
+    "~/.cache/kitty-tab-bar"
+)
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
 # Programs whose tabs show their full window title rather than its first word,

@@ -10,7 +10,9 @@
 #   instance.sh stop  <sandbox>
 #
 # The kitty binary defaults to the installed app. The matching kitten binary of
-# the same build is used for remote control.
+# the same build is used for remote control. The tab bar keeps its cache in
+# <sandbox>/cache/tab-bar rather than the user's ~/.cache/kitty-tab-bar, see
+# KITTY_TAB_BAR_CACHE_DIR in tab_bar.py.
 set -uo pipefail
 
 DEFAULT_KITTY=/Applications/kitty.app/Contents/MacOS/kitty
@@ -39,10 +41,11 @@ case "$cmd" in
         # Launch the app bundle in the background with open -g, so the instance
         # does not take keyboard focus from whatever the user is typing in
         app=${kitty%/Contents/MacOS/kitty}
-        # A private cache directory, so that sessions saved by the instance (see
-        # restore_session_after_logout) are never restored by the user's kitty
+        # Private cache directories, so that sessions saved by the instance (see
+        # restore_session_after_logout) are never restored by the user's kitty, and
+        # the tab bar's status providers leave the user's caches alone
         open -g -n -a "$app" --env "KITTY_CONFIG_DIRECTORY=$dir" --env "KITTY_CACHE_DIRECTORY=$dir/cache" \
-            --env "SHELL=$login_shell" \
+            --env "KITTY_TAB_BAR_CACHE_DIR=$dir/cache/tab-bar" --env "SHELL=$login_shell" \
             --stdout "$dir/kitty.log" --stderr "$dir/kitty.log" \
             --args -o allow_remote_control=socket-only -o "listen_on=unix:$dir/rc.sock" "$@"
         for _ in $(seq 50); do

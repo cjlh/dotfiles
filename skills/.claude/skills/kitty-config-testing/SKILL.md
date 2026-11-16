@@ -21,14 +21,12 @@ from that config while you work, so:
 All in `scripts/` next to this file. Use bash for anything that drives kitty (zsh does not
 word-split `$VARS`, and errors on globs with no matches).
 
-- `sandbox.sh <dir> [config line...]` creates a throwaway config directory that includes
+- `sandbox.sh <dir> [config line...]` creates a throwaway config directory with a copy of
   the real `kitty.conf`, symlinks every other real config file, and appends the given
   lines (later lines override earlier ones). To try a changed copy of a file, replace its
-  symlink in the sandbox with the copy. Python files (watchers, kittens) are resolved
-  against the sandbox, but the `include ./…` lines of the real `kitty.conf` resolve next
-  to the real file, so replacing an included `.conf` (e.g. `watchers.conf`) in the
-  sandbox has no effect. Either add the changed lines to the sandbox `kitty.conf`, or copy
-  the real `kitty.conf` into the sandbox in place of the include.
+  symlink in the sandbox with the copy. This works for included `.conf` files too,
+  because the sandbox's `kitty.conf` includes them from the sandbox (see Pitfalls).
+  `watchers.conf` is already a copy, which you can edit in place.
 - Keep sandboxes on a short path, such as a `/tmp/<short>` symlink to the scratchpad.
   The remote control socket lives in the sandbox, and macOS limits socket paths to 104
   characters. Past that, kitty starts but the socket never appears.
@@ -36,7 +34,10 @@ word-split `$VARS`, and errors on globs with no matches).
   sandbox in the background (it does not take focus from the user), with remote control
   limited to a private socket in the sandbox, and a private cache directory
   (`<sandbox>/cache`), so that sessions it saves for `restore_session_after_logout` are
-  never restored by the user's kitty. The keys of those sessions still go in the real
+  never restored by the user's kitty. The tab bar's status providers read and write
+  their caches in `<sandbox>/cache/tab-bar` rather than `~/.cache/kitty-tab-bar`, through
+  `KITTY_TAB_BAR_CACHE_DIR` in `tab_bar.py`. Write cache files there to give the tab bar
+  data to show. The keys of those sessions still go in the real
   login keychain, so check none are left afterwards with
   `security find-generic-password -s net.kovidgoyal.kitty.session-saved-at-logout`.
   Then:
@@ -45,23 +46,32 @@ word-split `$VARS`, and errors on globs with no matches).
     `send-text --match title:^B$ 'exit\r'` (what ctrl+d does at a prompt),
     `get-text --match id:3`, `ls`.
   - `instance.sh log <sandbox>` shows kitty's stderr minus known noise. Check it after
-    every scenario, watcher and kitten errors only show up here.
+    every scenario, watcher and kitten errors only show up here. It includes errors the
+    config's Python code logs with `log_error`, thanks to the `sandbox_log.py` watcher
+    that `sandbox.sh` adds (see Pitfalls).
   - `instance.sh stop <sandbox>`.
 - `inspect_tabs.py` is a kitten that runs inside kitty and dumps its real window state as
   JSON: layouts, normal windows, docks, geometry, user vars and the text each window
   shows. Run it with
   `instance.sh rc <sandbox> kitten <path>/inspect_tabs.py <output.json>`. Prefer it over
   `kitten @ ls`, which does not report docks.
+- `tab_bar_text.py` is a kitten that dumps the text of each OS window's tab bar as JSON,
+  one string per OS window. Run it like `inspect_tabs.py`. It draws the tab bar first
+  with kitty's own code path, as the hidden instances never render it themselves.
 
 ## Workflow
 
 1. Read the relevant kitty source for the exact build being tested (see below) rather than
    relying on memory, kitty's internals change often.
-2. Write the change into a sandbox (`sandbox.sh`, then edit or replace files).
+2. Write the change into a sandbox (`sandbox.sh`, then edit or replace files). Never edit
+   the repo's files before step 5, however small the change: the user's kitty loads them.
 3. Script the scenarios with `instance.sh` in a bash file kept outside the sandbox,
-   asserting on `inspect_tabs.py` output and `instance.sh log`. Cover the edge cases:
-   windows opening and closing, the last window closing, layout switches, both the
-   installed kitty and a nightly where relevant.
+   asserting on `inspect_tabs.py` or `tab_bar_text.py` output and `instance.sh log`.
+   Cover the edge cases: windows opening and closing, the last window closing, layout
+   switches, both the installed kitty and a nightly where relevant. For tab bar status
+   providers, write their cache files in `<sandbox>/cache/tab-bar` to test what they
+   show. To test a real refresh, draw the tab bar with `tab_bar_text.py` and keep calling
+   it until the cache file appears (see Pitfalls).
 4. For pure rendering code, test it without a running instance by drawing on a real kitty
    `Screen`:
 
@@ -153,3 +163,21 @@ their docs), `docs/changelog.rst`.
 - **Config reloads:** editing a sandbox file through a symlinked path does not trigger
   kitty's automatic reload. Run `instance.sh rc <sandbox> load-config` instead. A reload
   that changes the `watcher` lines loads the new watchers into the running instance.
+- **Includes resolve from the including file's directory**, not from the config directory
+  (`kitty/conf/utils.py` in 0.49.2). This is why `sandbox.sh` copies `kitty.conf` rather
+  than including it: an included real `kitty.conf` loads the real `./watchers.conf` and
+  every other `./` include, whatever the sandbox holds.
+- **`log_error` goes to macOS's unified log**, not stderr, when Launch Services starts
+  kitty (`kitty/main.py` and `kitty/logging.c` in 0.49.2), which is how `instance.sh`
+  starts it. `sandbox.sh` adds the `sandbox_log.py` watcher to every sandbox, which sets
+  `log_error.redirect` to write to stderr instead. Errors that kitty's C code logs still
+  go to the unified log only, readable with
+  `log show --predicate 'processID == <pid> AND messageType == error'`, which may need
+  permission to read the log store.
+- **Hidden instances don't render.** Instances started with `open -g` stay behind the
+  user's windows, so kitty never draws them: a tab bar's screen stays empty until
+  something draws it, such as `tab_bar_text.py`. `tab_bar.py` starts its refresh timer
+  from `draw_tab`, so until the tab bar is first drawn its status providers never
+  refresh. After that, a refresh's result is only handled when kitty's main loop wakes
+  up, which remote control commands do. So to wait for a refresh, keep calling
+  `tab_bar_text.py` (for example every second) until the cache file appears.
