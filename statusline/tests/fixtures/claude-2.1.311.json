@@ -1,0 +1,44 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "cwd": "/tmp",
+  "effort": {
+    "level": "high"
+  },
+  "session_name": "example session",
+  "model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "workspace": {
+    "current_dir": "/tmp",
+    "project_dir": "/tmp",
+    "added_dirs": [],
+    "repo": {
+      "host": "github.com",
+      "owner": "example",
+      "name": "repo"
+    }
+  },
+  "version": "2.1.311",
+  "output_style": {
+    "name": "default"
+  },
+  "context_window": {
+    "total_input_tokens": 143596,
+    "total_output_tokens": 16,
+    "context_window_size": 1000000,
+    "current_usage": {
+      "input_tokens": 2,
+      "output_tokens": 16,
+      "cache_creation_input_tokens": 1238,
+      "cache_read_input_tokens": 142356
+    },
+    "used_percentage": 14,
+    "remaining_percentage": 86
+  },
+  "exceeds_200k_tokens": false,
+  "fast_mode": false,
+  "thinking": {
+    "enabled": true
+  }
+}

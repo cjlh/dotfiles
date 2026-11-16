@@ -1,0 +1,6 @@
+# Only .local/bin is installed. Replaces stow's default ignore list.
+^/README\.md
+^/tests
+__pycache__
+\.pytest_cache
+\.ruff_cache

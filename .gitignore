@@ -2,6 +2,8 @@
 __MACOSX/
 
 __pycache__
+.pytest_cache
+.ruff_cache
 
 # Local kitty config
 kitty/.config/kitty/status_providers.toml

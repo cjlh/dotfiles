@@ -1,0 +1,30 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/transcript.jsonl",
+  "render_width_chars": 146,
+  "cwd": "/tmp",
+  "autorun": true,
+  "model": {
+    "id": "gemini-4-carbon",
+    "display_name": "Gemini 4 Carbon Medium",
+    "param_summary": "Medium"
+  },
+  "workspace": {
+    "current_dir": "/tmp",
+    "project_dir": "/tmp/project",
+    "added_dirs": []
+  },
+  "version": "2026.11.13-eacade1",
+  "output_style": {
+    "name": "compact"
+  },
+  "context_window": {
+    "total_input_tokens": null,
+    "total_output_tokens": null,
+    "context_window_size": null,
+    "used_percentage": null,
+    "remaining_percentage": null,
+    "current_usage": null
+  },
+  "session_name": "example session"
+}

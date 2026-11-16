@@ -1,0 +1,660 @@
+#!/usr/bin/env -S uv run --quiet --script
+
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+
+# Prints a one-line status line for coding agent TUIs. The left side shows where
+# the agent is working: the directory, the git branch, and the branch's open
+# pull request. The right side shows the model, its reasoning effort, and how
+# much of the context window is used:
+#
+#   ExampleProject/main · fix-1234-new-label · #1234         Opus 5.5 (high) · 62%
+#
+# The agent passes the session as JSON on stdin. Each agent has its own JSON
+# format, so --host says which one to read. In ~/.claude/settings.json:
+#
+#   "statusLine": {
+#     "type": "command",
+#     "command": "~/.local/bin/agent-statusline --host claude",
+#     "refreshInterval": 1
+#   }
+#
+# Claude Code does not re-run the command when the terminal is resized, so
+# refreshInterval re-runs it every second to follow the new width.
+#
+# In ~/.cursor/cli-config.json:
+#
+#   "statusLine": {
+#     "type": "command",
+#     "command": "~/.local/bin/agent-statusline --host cursor",
+#     "updateIntervalMs": 1000
+#   }
+#
+# Cursor re-runs the command when the session changes, at most once per
+# updateIntervalMs, but not when the terminal is resized. A right-aligned line
+# would be out of place after a resize, so in Cursor the right side follows the
+# left one instead:
+#
+#   ExampleProject/main · fix-1234-new-label · #1234 · Gemini 4 Carbon (medium) · 62%
+#
+# The line never wraps. When it does not fit, parts are dropped in this order:
+# the reasoning effort, the end of the branch name, all of the directory except
+# its last folder, then the pull request.
+#
+# Looking up the pull request with gh takes about a second, so it is cached for
+# each branch. A stale or missing entry is shown as it is, while this script
+# refreshes it in the background.
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+import unicodedata
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from enum import StrEnum
+from itertools import pairwise
+from pathlib import Path
+from typing import NotRequired, TypedDict, cast
+
+
+class Host(StrEnum):
+    CLAUDE = "claude"
+    CURSOR = "cursor"
+
+
+# Folders under home whose own path adds nothing. ~/Work holds a folder for each
+# repo, with a git worktree for each branch in it, so ~/Work/ExampleProject/main
+# shows as ExampleProject/main.
+STRIPPED_ROOTS = (Path("Work"), Path("Documents/Config"))
+
+# Longer paths show only the first letter of their middle folders, as fish does.
+# The first two folders (the repo and worktree under ~/Work) and the last two
+# stay whole.
+MAX_WHOLE_FOLDERS = 5
+
+# The fewest columns a shortened branch name keeps, so it stays recognisable.
+MIN_BRANCH_WIDTH = 12
+# Below this, a cut-down directory is little more than "…", so it is left out
+MIN_LEFT_WIDTH = 4
+MIN_GAP = 2
+
+# The context percentage fades from gray through orange to red, reaching red here
+CONTEXT_FULL_PERCENT = 95
+# How steeply the fade rises at the end. Higher keeps it gray for longer: at 6,
+# it stays gray up to 50% and reaches orange at 82%.
+CONTEXT_CURVE = 6
+
+GIT_TIMEOUT_SECONDS = 2
+GH_TIMEOUT_SECONDS = 30
+# How long a looked-up pull request is shown before it is looked up again
+PULL_REQUEST_CACHE_SECONDS = 60
+
+# SGR codes. The grays are fixed instead of following the terminal theme, as
+# the theme's bright black is too dark to read on its background.
+DIM = "2"
+GRAY = "38;5;244"
+# The gray Claude Code uses for its own hints, such as "(shift+tab to cycle)"
+LIGHT_GRAY = "38;2;153;153;153"
+
+
+@dataclass(frozen=True)
+class Session:
+    cwd: Path
+    model: str
+    # The reasoning effort for Claude Code. For Cursor, the summary of the
+    # model's settings, such as "high fast".
+    effort: str | None
+    context_used_percent: float | None
+    # The columns the agent gives the status line
+    width: int
+
+
+@dataclass(frozen=True)
+class GitState:
+    root: Path
+    # None when HEAD is detached
+    branch: str | None
+    # The branch, or the commit when HEAD is detached
+    label: str
+
+
+@dataclass(frozen=True)
+class PullRequest:
+    number: int
+    url: str
+
+
+def terminal_text(text: str) -> str:
+    """Replace terminal controls and invisible formatting with visible placeholders."""
+    return "".join(
+        "�" if unicodedata.category(char) in ("Cc", "Cf", "Cs", "Zl", "Zp") else char
+        for char in text
+    )
+
+
+@dataclass(frozen=True)
+class Span:
+    text: str
+    sgr: tuple[str, ...] = ()
+    # Makes the text a link, in terminals that support OSC 8 hyperlinks
+    link: str | None = None
+
+    def __post_init__(self) -> None:
+        # Sanitize before measuring or truncating so layout uses the printed text.
+        object.__setattr__(self, "text", terminal_text(self.text))
+        if self.link is not None:
+            object.__setattr__(self, "link", terminal_text(self.link))
+
+
+SEPARATOR = Span(" · ", (DIM,))
+
+
+# The parts of Claude Code's payload used here. The full schema is at
+# https://code.claude.com/docs/en/statusline.md#available-data
+class ClaudeWorkspace(TypedDict):
+    current_dir: str
+
+
+class ClaudeModel(TypedDict):
+    display_name: str
+
+
+class ClaudeEffort(TypedDict):
+    level: str
+
+
+class ClaudeContextWindow(TypedDict):
+    # Null early in a session and after /compact
+    used_percentage: float | None
+
+
+class ClaudePayload(TypedDict):
+    workspace: ClaudeWorkspace
+    model: ClaudeModel
+    # Left out for models without a reasoning effort setting
+    effort: NotRequired[ClaudeEffort]
+    context_window: ClaudeContextWindow
+
+
+# Claude Code indents its status line by two columns on each side, which the
+# COLUMNS it passes does not account for. It cuts a longer line short with "…".
+CLAUDE_INSET = 4
+
+
+def parse_claude(text: str) -> Session:
+    payload = cast(ClaudePayload, json.loads(text))
+    effort = payload.get("effort")
+    return Session(
+        cwd=Path(payload["workspace"]["current_dir"]),
+        model=clean(payload["model"]["display_name"]),
+        effort=effort["level"] if effort else None,
+        context_used_percent=payload["context_window"]["used_percentage"],
+        width=max(0, int(os.environ["COLUMNS"]) - CLAUDE_INSET),
+    )
+
+
+# The parts of Cursor's payload used here. Cursor does not document the
+# payload: these fields are from cursor-agent 2026.11.13's status line code,
+# and its built-in skill at ~/.cursor/skills-cursor/statusline/SKILL.md.
+class CursorWorkspace(TypedDict):
+    current_dir: str
+
+
+class CursorModel(TypedDict):
+    display_name: str
+    # The model's settings, such as "High" or "High Fast". Empty or left out
+    # for models without settings.
+    param_summary: NotRequired[str]
+
+
+class CursorContextWindow(TypedDict):
+    # Null until the first response
+    used_percentage: float | None
+
+
+class CursorPayload(TypedDict):
+    workspace: CursorWorkspace
+    model: CursorModel
+    context_window: CursorContextWindow
+    # The terminal width, less Cursor's indent of two columns on each side
+    render_width_chars: int
+
+
+def parse_cursor(text: str) -> Session:
+    payload = cast(CursorPayload, json.loads(text))
+    summary = clean(payload["model"].get("param_summary", ""))
+    model = clean(payload["model"]["display_name"])
+    # Display names end with the settings, as in "Gemini 4 Carbon Medium"
+    if summary:
+        model = model.removesuffix(f" {summary}")
+    return Session(
+        cwd=Path(payload["workspace"]["current_dir"]),
+        model=model,
+        effort=summary.lower() or None,
+        context_used_percent=payload["context_window"]["used_percentage"],
+        width=payload["render_width_chars"],
+    )
+
+
+def clean(text: str) -> str:
+    """Removes invisible characters and runs of spaces, which some of Cursor's model names have."""
+    visible = "".join(char for char in text if unicodedata.category(char) != "Cf")
+    return " ".join(visible.split())
+
+
+@dataclass(frozen=True)
+class HostSpec:
+    parse: Callable[[str], Session]
+    # Claude Code shows the open pull request as a badge in its own footer.
+    # Cursor's footer has one too, but a custom status line replaces the footer.
+    shows_pull_request: bool
+    # Whether the right side is aligned to the right edge. Only agents that
+    # re-run the command after a resize can keep it there.
+    right_aligned: bool
+
+
+HOSTS = {
+    Host.CLAUDE: HostSpec(
+        parse=parse_claude, shows_pull_request=False, right_aligned=True
+    ),
+    Host.CURSOR: HostSpec(
+        parse=parse_cursor, shows_pull_request=True, right_aligned=False
+    ),
+}
+
+
+def git_state(cwd: Path) -> GitState | None:
+    """Returns None outside a git work tree."""
+    toplevel = _git(cwd, "rev-parse", "--show-toplevel")
+    if toplevel.returncode == 128:
+        return None
+    toplevel.check_returncode()
+    root = Path(toplevel.stdout.removesuffix("\n"))
+    branch = _git(cwd, "symbolic-ref", "--short", "--quiet", "HEAD")
+    if branch.returncode == 0:
+        name = branch.stdout.strip()
+        return GitState(root=root, branch=name, label=name)
+    # symbolic-ref exits with 1 when HEAD is detached
+    if branch.returncode != 1:
+        branch.check_returncode()
+    detached = _git(cwd, "rev-parse", "--short", "HEAD")
+    detached.check_returncode()
+    commit = detached.stdout.removesuffix("\n")
+    git_dir_result = _git(cwd, "rev-parse", "--absolute-git-dir")
+    git_dir_result.check_returncode()
+    git_dir = Path(git_dir_result.stdout.removesuffix("\n"))
+    # A rebase detaches HEAD until it finishes
+    rebasing = any(
+        (git_dir / name).exists() for name in ("rebase-merge", "rebase-apply")
+    )
+    return GitState(
+        root=root,
+        branch=None,
+        label=f"@{commit} (rebasing)" if rebasing else f"@{commit}",
+    )
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=GIT_TIMEOUT_SECONDS,
+    )
+
+
+class CachedPullRequest(TypedDict):
+    number: int
+    url: str
+
+
+class PullRequestCache(TypedDict):
+    checked_at: float
+    pull_request: CachedPullRequest | None
+
+
+def open_pull_request(root: Path, branch: str) -> PullRequest | None:
+    """Returns the cached open pull request for the branch, and refreshes the cache in the background when it is stale."""
+    path = _cache_path(root, branch)
+    cache = (
+        cast(PullRequestCache, json.loads(path.read_text())) if path.exists() else None
+    )
+    cached = cache["pull_request"] if cache else None
+    if cache is None or time.time() - cache["checked_at"] > PULL_REQUEST_CACHE_SECONDS:
+        # Mark the entry as checked first, so that the runs that follow while
+        # the lookup is running don't start more lookups
+        _write_cache(
+            path, PullRequestCache(checked_at=time.time(), pull_request=cached)
+        )
+        with (_cache_dir() / "refresh.log").open("a") as log:
+            _ = subprocess.Popen(
+                [__file__, "--refresh-pull-request", str(root), branch],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=log,
+                start_new_session=True,
+            )
+    return PullRequest(number=cached["number"], url=cached["url"]) if cached else None
+
+
+def refresh_pull_request(root: Path, branch: str) -> None:
+    result = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "number,url",
+            "--limit",
+            "1",
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=GH_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"gh pr list failed for {branch} in {root}: {result.stderr.strip()}"
+        )
+    found = cast(list[CachedPullRequest], json.loads(result.stdout))
+    _write_cache(
+        _cache_path(root, branch),
+        PullRequestCache(
+            checked_at=time.time(), pull_request=found[0] if found else None
+        ),
+    )
+
+
+def _cache_dir() -> Path:
+    return (
+        Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        / "agent-statusline"
+    )
+
+
+def _cache_path(root: Path, branch: str) -> Path:
+    key = hashlib.sha256(f"{root}\0{branch}".encode()).hexdigest()[:16]
+    return _cache_dir() / f"pull-request-{key}.json"
+
+
+def _write_cache(path: Path, cache: PullRequestCache) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    _ = temporary.write_text(json.dumps(cache))
+    _ = temporary.replace(path)
+
+
+def display_folders(cwd: Path, home: Path) -> list[str]:
+    for root in STRIPPED_ROOTS:
+        base = home / root
+        if cwd.is_relative_to(base) and cwd != base:
+            folders = list(cwd.relative_to(base).parts)
+            break
+    else:
+        if cwd.is_relative_to(home):
+            folders = ["~", *cwd.relative_to(home).parts]
+        elif cwd == Path(cwd.anchor):
+            folders = ["/"]
+        else:
+            folders = ["", *cwd.parts[1:]]
+    if len(folders) > MAX_WHOLE_FOLDERS:
+        folders = [*folders[:2], *map(_abbreviate, folders[2:-2]), *folders[-2:]]
+    return folders
+
+
+def _abbreviate(folder: str) -> str:
+    return folder[:2] if folder.startswith(".") else folder[:1]
+
+
+def path_spans(folders: list[str]) -> list[Span]:
+    return [Span("/".join(folders), (GRAY,))]
+
+
+def right_spans(session: Session, *, with_effort: bool) -> list[Span]:
+    spans = [Span(session.model, (LIGHT_GRAY,))]
+    if with_effort and session.effort is not None:
+        spans.append(Span(f" ({session.effort})", (GRAY,)))
+    if session.context_used_percent is not None:
+        spans += [
+            SEPARATOR,
+            Span(
+                f"{session.context_used_percent:.0f}%",
+                (_context_colour(session.context_used_percent),),
+            ),
+        ]
+    return spans
+
+
+# The colours the context fade passes through, as how far along the fade each
+# one is and the RGB values of 256-colour 244, 208 and 167
+CONTEXT_FADE_STOPS = (
+    (0.0, (128, 128, 128)),
+    (0.5, (255, 135, 0)),
+    (1.0, (215, 95, 95)),
+)
+# The levels of each channel in the 256-colour palette's 6x6x6 colour cube
+CUBE_LEVELS = (0, 95, 135, 175, 215, 255)
+
+
+def _context_colour(percent: float) -> str:
+    # An exponential curve, so the colour barely moves until the context is
+    # nearly full, then rises quickly through orange to red
+    progress = min(max(percent / CONTEXT_FULL_PERCENT, 0), 1)
+    weight = math.expm1(CONTEXT_CURVE * progress) / math.expm1(CONTEXT_CURVE)
+    return f"38;5;{_nearest_256_colour(_fade(weight))}"
+
+
+def _fade(weight: float) -> tuple[float, ...]:
+    """Returns the RGB values weight of the way along the context fade."""
+    for (start, start_rgb), (end, end_rgb) in pairwise(CONTEXT_FADE_STOPS):
+        if weight <= end:
+            t = (weight - start) / (end - start)
+            return tuple(
+                a + (b - a) * t for a, b in zip(start_rgb, end_rgb, strict=True)
+            )
+    return CONTEXT_FADE_STOPS[-1][1]
+
+
+def _nearest_256_colour(rgb: tuple[float, ...]) -> int:
+    """Returns the 256-colour index closest to rgb, from the colour cube or the gray ramp."""
+    cube = {
+        16 + 36 * r + 6 * g + b: (CUBE_LEVELS[r], CUBE_LEVELS[g], CUBE_LEVELS[b])
+        for r in range(6)
+        for g in range(6)
+        for b in range(6)
+    }
+    grays = {232 + i: (8 + 10 * i,) * 3 for i in range(24)}
+    palette = cube | grays
+    return min(palette, key=lambda index: math.dist(palette[index], rgb))
+
+
+def render_line(
+    session: Session,
+    git: GitState | None,
+    pull_request: PullRequest | None,
+    home: Path,
+    *,
+    right_aligned: bool,
+) -> str:
+    width = session.width
+    gap = MIN_GAP if right_aligned else _width([SEPARATOR])
+    folders = display_folders(session.cwd, home)
+    last_folder_only = ["…", folders[-1]] if len(folders) > 1 else folders
+    candidates = [
+        (folders, True, False, pull_request),
+        (folders, False, False, pull_request),
+        (folders, False, True, pull_request),
+        (last_folder_only, False, True, pull_request),
+        (last_folder_only, False, True, None),
+    ]
+    for (
+        candidate_folders,
+        with_effort,
+        shorten_branch,
+        candidate_pull_request,
+    ) in candidates:
+        right = right_spans(session, with_effort=with_effort)
+        left = _left_spans(
+            candidate_folders,
+            git.label if git else None,
+            candidate_pull_request,
+            budget=width - _width(right) - gap,
+            shorten_branch=shorten_branch,
+        )
+        if left is not None:
+            return _join(left, right, width, right_aligned=right_aligned)
+    # Too narrow for even the shortest layout, so cut the whole line. The right
+    # side is kept whole while it fits, as the context use matters most.
+    right = _truncate_spans(right_spans(session, with_effort=False), width)
+    left_budget = width - _width(right) - gap
+    left = (
+        _truncate_spans(path_spans(last_folder_only), left_budget)
+        if left_budget >= MIN_LEFT_WIDTH
+        else []
+    )
+    return _join(left, right, width, right_aligned=right_aligned)
+
+
+def _join(
+    left: list[Span], right: list[Span], width: int, *, right_aligned: bool
+) -> str:
+    if right_aligned:
+        return (
+            _render(left)
+            + " " * (width - _width(left) - _width(right))
+            + _render(right)
+        )
+    return _render([*left, SEPARATOR, *right] if left and right else left or right)
+
+
+def _left_spans(
+    folders: list[str],
+    ref: str | None,
+    pull_request: PullRequest | None,
+    *,
+    budget: int,
+    shorten_branch: bool,
+) -> list[Span] | None:
+    """Returns the left side if it fits in the budget, shortening the branch name if allowed."""
+    path = path_spans(folders)
+    if ref is None:
+        return path if _width(path) <= budget else None
+    ref = terminal_text(ref)
+    tail = (
+        [SEPARATOR, Span(f"#{pull_request.number}", (GRAY,), pull_request.url)]
+        if pull_request
+        else []
+    )
+    branch_budget = budget - _width([*path, SEPARATOR, *tail])
+    if _text_width(ref) <= branch_budget:
+        return [*path, SEPARATOR, Span(ref, (GRAY,)), *tail]
+    if not shorten_branch or branch_budget < MIN_BRANCH_WIDTH:
+        return None
+    return [*path, SEPARATOR, Span(_truncate(ref, branch_budget), (GRAY,)), *tail]
+
+
+def _render(spans: list[Span]) -> str:
+    return "".join(_render_span(span) for span in spans if span.text)
+
+
+def _render_span(span: Span) -> str:
+    text = f"\033[{';'.join(span.sgr)}m{span.text}\033[0m" if span.sgr else span.text
+    return f"\033]8;;{span.link}\033\\{text}\033]8;;\033\\" if span.link else text
+
+
+def _width(spans: list[Span]) -> int:
+    return sum(_text_width(span.text) for span in spans)
+
+
+def _text_width(text: str) -> int:
+    return sum(_char_width(char) for char in text)
+
+
+def _char_width(char: str) -> int:
+    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+
+
+def _truncate(text: str, width: int) -> str:
+    if _text_width(text) <= width:
+        return text
+    return "".join(_chars_within(text, width - 1)) + "…"
+
+
+def _chars_within(text: str, width: int) -> Iterator[str]:
+    used = 0
+    for char in text:
+        used += _char_width(char)
+        if used > width:
+            return
+        yield char
+
+
+def _truncate_spans(spans: list[Span], width: int) -> list[Span]:
+    if width <= 0:
+        return []
+    if _width(spans) <= width:
+        return spans
+    kept: list[Span] = []
+    remaining = width - 1
+    for span in spans:
+        text = "".join(_chars_within(span.text, remaining))
+        kept.append(Span(text, span.sgr, span.link))
+        remaining -= _text_width(text)
+        if text != span.text:
+            break
+    return [*kept, Span("…", kept[-1].sgr if kept else ())]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Print a one-line status line for a coding agent TUI."
+    )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    _ = mode.add_argument(
+        "--host", type=Host, choices=list(Host), help="the agent passing the session"
+    )
+    _ = mode.add_argument(
+        "--refresh-pull-request",
+        nargs=2,
+        metavar=("REPO_ROOT", "BRANCH"),
+        help="look up the open pull request for a branch and cache it, as the status line does in the background",
+    )
+    args = parser.parse_args()
+    refresh = cast(list[str] | None, args.refresh_pull_request)
+    if refresh is not None:
+        root, branch = refresh
+        refresh_pull_request(Path(root), branch)
+        return
+    host = HOSTS[cast(Host, args.host)]
+    session = host.parse(sys.stdin.read())
+    git = git_state(session.cwd)
+    pull_request = (
+        open_pull_request(git.root, git.branch)
+        if host.shows_pull_request and git is not None and git.branch is not None
+        else None
+    )
+    print(
+        render_line(
+            session, git, pull_request, Path.home(), right_aligned=host.right_aligned
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

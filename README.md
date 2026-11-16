@@ -31,6 +31,9 @@ stow asdf
 mkdir -p ~/.claude/skills  # avoid symlinking entire skills directory
 stow skills
 
+# Status line for coding agents - see statusline/README.md for per-harness configuration
+stow statusline
+
 # Neovim (https://github.com/neovim/neovim)
 brew install neovim fd tree-sitter tree-sitter-cli
 stow neovim
