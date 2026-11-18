@@ -10,6 +10,8 @@ if status is-interactive
       if not set -q __prompt_clock_pid
           or not kill -0 $__prompt_clock_pid 2>/dev/null
 
+          # Detach the timer from this shell's stdio. Otherwise anything reading this shell's output, such as
+          # an editor resolving the shell environment, waits until the timer exits (up to a minute).
           fish --no-config -c '
               while kill -0 $argv[1] 2>/dev/null
                   # Wake at the beginning of the next minute.
@@ -19,7 +21,7 @@ if status is-interactive
                   kill -s USR1 $argv[1] 2>/dev/null
                   or break
               end
-          ' $fish_pid &
+          ' $fish_pid </dev/null >/dev/null 2>&1 &
 
           set -g __prompt_clock_pid $last_pid
           disown $__prompt_clock_pid
