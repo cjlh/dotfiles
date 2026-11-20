@@ -1,38 +1,5 @@
-# Custom tab bar that displays status items in the far right corner, by
-# by default just available disk space. The items are listed in
-# tab_bar.toml, if it exists, a copy of tab_bar.example.toml
-# which documents how to add one and adds Codex and Claude Code usage: besides
-# disk space, which is sampled every redraw interval, each is a command
-# printing JSON. All providers
-# read JSON caches in ~/.cache/kitty-tab-bar and refresh them concurrently in
-# the background.
-#
-# Renamed tabs are marked with an icon, see RENAMED_TAB_ICON_MODE. In "dynamic"
-# mode the icon is picked by the namer script from this repo's scripts
-# package, which is run in the background whenever a tab is renamed, see
-# PickedIcons, unless name_tab.py picked it with the tab's name. If it fails the tab shows RENAMED_TAB_FIXED_ICON until renamed.
-# Names starting with a status tag, such as "[done] some task", show the
-# status's icon in place of the tag instead, see STATUS_TAG_ICONS.
-#
-# While name_tab.py generates a tab's name, namer picks its icon, or a program
-# in the tab reports that it is working (see _program_states), the icon is
-# replaced by a spinner, which a timer animates only while some tab is
-# waiting. Redraws that change nothing but what is drawn, such as the spinner's,
-# set DRAW_ONLY_ATTR so that watchers can skip their work, see
-# _mark_tab_bar_dirty.
-#
-# Tabs in the stack layout with more than one window show an indicator per
-# window after their title. Choose its style in tab_bar.toml under [tabs].
-#
-# Tabs with a window waiting on the user are drawn in a colour for what it waits
-# on, see _attention_color: a program blocked on the user, a program that failed,
-# or a program that finished or rang the bell while the user wasn't looking.
-# Inactive tabs use a dimmed variant of the colour, see INACTIVE_TAB_SATURATION.
-#
-# kitty runs this file again when its config is reloaded, see _shared. It draws
-# with the copy loaded by the previous reload though, as it only forgets that
-# copy after applying the reloaded config, so edits here take two reloads.
-# See: https://github.com/kovidgoyal/kitty/discussions/4447
+# Custom tab bar with status indicators, automatic tab icons, and stack markers.
+# Configure status providers and appearance in tab_bar.toml.
 
 import colorsys
 import json
@@ -70,30 +37,27 @@ from kitty.tab_bar import (
 from kitty.rgb import to_color
 from kitty.utils import color_as_int, log_error
 
-# Optional per-machine tab bar settings. See tab_bar.example.toml.
 CONFIG_PATH = os.path.join(config_dir, "tab_bar.toml")
 PROVIDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
-# Defaults of a provider's keys in CONFIG_PATH
+# Default command-provider settings.
 COMMAND_REFRESH_INTERVAL = 180  # seconds between runs of its command
 COMMAND_TIMEOUT = 60  # seconds before a run of its command is killed
-# Percentage of an agent's weekly limit from which it is shown
+# Show weekly usage once it reaches this percentage.
 WEEKLY_USAGE_THRESHOLD = 0
 DISK_TIMEOUT = 5  # seconds before a disk query is abandoned
 DISK_POLL_INTERVAL = 0.01  # seconds between checks for a finished disk query
 REDRAW_INTERVAL = 30  # seconds between tab bar redraws
-# When this copy of the module was loaded, see _shared
 LOADED_AT = time.monotonic()
-# Test instances keep their own cache, see the kitty-config-testing skill
+# Allow test instances to use separate caches.
 CACHE_DIR = os.environ.get("KITTY_TAB_BAR_CACHE_DIR") or os.path.expanduser(
     "~/.cache/kitty-tab-bar"
 )
 STATUS_FG = as_rgb(0x656565)
 MAX_SHORT_TITLE_LENGTH = 24
-# Programs whose tabs show their full window title rather than its first word,
-# matched against the name they were run as: Claude Code's executable is named
-# after its version, so the foreground exe can't be used
+# Keep full titles for these programs. Match the command name because Claude
+# Code's executable filename contains its version instead of its name.
 FULL_TITLE_PROGRAMS = frozenset({"claude", "codex"})
-# seconds; its first run on a machine downloads llama.cpp and d1-2B (1.8 GB)
+# Allow time for model downloads on the first run (seconds).
 NAMER_TIMEOUT = 600
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH.
@@ -109,13 +73,10 @@ NAMER = shutil.which("namer", path=HELPER_PATH)
 
 TabIconMode = Literal["dynamic", "fixed"]
 
-# "dynamic" has the namer script pick an icon to suit the tab's name, which
-# needs both it and uv to be present
 RENAMED_TAB_ICON_MODE: TabIconMode = (
     "dynamic" if NAMER and shutil.which("uv", path=HELPER_PATH) else "fixed"
 )
 
-# Alternatives: ✎, ★, ✦, ⚐
 RENAMED_TAB_FIXED_ICON = "⚑"
 
 # Tags that replace a renamed tab's icon, matched case-insensitively
@@ -126,44 +87,47 @@ STATUS_TAG_ICONS = {
 }
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
 
-# The formatting codes {fmt...} expands to in title templates
+# Strip SGR formatting before measuring title width.
 SGR_ESCAPE = re.compile(r"\x1b\[[0-9:;]*m")
 
-# Set on tabs by name_tab.py while it generates their name, must match there
+# The previous tab name, saved while automatic naming is in progress.
 NAMING_ATTR = "name_tab_previous_name"
 
-# Set on tabs by name_tab.py to have their icon picked anew, rather than taken
-# from namer's cache, or to the name it gave them and the icon picked with it.
-# Must match there.
+# True requests a fresh icon; a (name, icon) pair supplies one directly.
 REPICK_ICON_ATTR = "tab_bar_repick_icon"
 
-# Set on renamed tabs to their TabIcon in "dynamic" mode
+# Store each tab's TabIcon on the tab so it survives config reloads.
 TAB_ICON_ATTR = "tab_bar_icon"
 
-# Shown in place of the icon of tabs being named or waiting for their icon,
-# one frame per interval
-SPINNER_FRAMES = "⠦⠖⠲⠴"
+# Icons for program states in priority order, matching the tab colour priority.
+# Keys are a state, or "blocked:<kind>" for why a program is blocked. None
+# shows the spinner.
+PROGRAM_STATE_ICONS = {
+    "blocked:permission": "⊘",
+    "blocked:question": "◌",
+    "blocked:auth": "⊛",
+    "blocked": "⊝",
+    "error": "⊗",
+    "working": None,
+    "done": "⊙",
+}
+
+SPINNER_FRAMES = "◐◓◑◒"
 SPINNER_INTERVAL = 0.12  # seconds
 
 STACK_LAYOUT = "stack"
 
-# Inactive tabs draw their _attention_color with its saturation and lightness
-# scaled by these, so that the active tab stands out
+# Dim status colours on inactive tabs so the active tab stands out.
 INACTIVE_TAB_SATURATION = 0.6
 INACTIVE_TAB_LIGHTNESS = 0.75
 
-# Set on a tab manager while its tab bar is marked dirty only to be redrawn,
-# with nothing about its tabs or windows changed. on_tab_bar_dirty is called
-# synchronously, so watchers that only care about changes return early while it
-# is set. Must match reader_mode.py, and any new watcher with
-# an on_tab_bar_dirty handler should check it too.
+# Marks redraws that don't change tab or window state, such as spinner frames.
+# Watchers can skip layout updates while this flag is set.
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
 
 
 @dataclass(frozen=True)
 class StackIndicator:
-    """Custom strings for a stack's inactive and active window markers."""
-
     inactive: str = "▫"
     active: str = "▪"
     separator: str = ""
@@ -176,10 +140,6 @@ class StackIndicator:
 
 @dataclass(frozen=True)
 class TabColors:
-    """Colours of tabs with a program blocked on the user, or that failed, see
-    _attention_color. Those with one that finished, or that rang the bell, use
-    active_border_color."""
-
     blocked: int = 0xDE7500
     error: int = 0xC90A0A
 
@@ -461,8 +421,7 @@ class DiskProvider(StatusProvider):
 
 
 class CommandProvider(StatusProvider):
-    """A status item whose data is printed as JSON by a command, as listed in
-    CONFIG_PATH. Subclasses are the formats the data can be in."""
+    """Run a command for JSON data; subclasses control how it is displayed."""
 
     def __init__(
         self,
@@ -490,7 +449,6 @@ class CommandProvider(StatusProvider):
         self.timeout = timeout
 
     def start_fetch(self, output_path: str, done) -> None:
-        # kitty may be launched from the Dock without Homebrew in PATH.
         env = {**os.environ, "PATH": HELPER_PATH}
         _run_monitored(
             self.command,
@@ -502,7 +460,7 @@ class CommandProvider(StatusProvider):
         )
 
     def format_data(self, data) -> str:
-        if data is None:  # The command has nothing to show.
+        if data is None:
             return ""
         text = self.format_text(data)
         return f"{self.icon} {text}".lstrip() if text else ""
@@ -522,8 +480,7 @@ class TextProvider(CommandProvider):
 
 
 class UsageProvider(CommandProvider):
-    """Shows how much of a subscription's session and weekly limits has been
-    used, e.g. that of a coding agent as printed by agent_usage.py."""
+    """Display session and weekly usage as percentages of subscription limits."""
 
     def __init__(
         self, *args, weekly_threshold: float = WEEKLY_USAGE_THRESHOLD, **kwargs
@@ -544,22 +501,18 @@ class UsageProvider(CommandProvider):
 
     @staticmethod
     def _used_percent(window, now: float) -> int:
-        # Usage can't always be refreshed, e.g. Claude Code's while it hasn't
-        # been used for some hours, so assume none since a limit has reset.
+        # Cached usage may outlive a limit reset. Treat it as zero after reset.
         resets_at = window["resets_at"]
         if resets_at is not None and resets_at <= now:
             return 0
         return round(window["percent"])
 
 
-# Providers that take no command, by the name they are listed under
 BUILTIN_PROVIDERS = {"disk": DiskProvider}
-# Values of a provider's format key
 COMMAND_PROVIDERS = {"text": TextProvider, "usage": UsageProvider}
 
 
 def _create_provider(spec) -> StatusProvider:
-    """The provider described by spec, a [[provider]] of CONFIG_PATH."""
     spec = dict(spec)
     name = spec.pop("name")
     if not isinstance(name, str) or not PROVIDER_NAME.fullmatch(name):
@@ -576,8 +529,7 @@ def _create_provider(spec) -> StatusProvider:
 
 
 def _load_providers() -> tuple[StatusProvider, ...]:
-    """Configured providers, defaulting to disk space when omitted.
-    Mistakes are logged, and only cost the providers they are in."""
+    """Load providers, using disk space by default and skipping invalid entries."""
     path = CONFIG_PATH
     if not os.path.exists(path):
         return (DiskProvider(),)
@@ -605,7 +557,7 @@ def _load_providers() -> tuple[StatusProvider, ...]:
 
 @dataclass
 class TabIcon:
-    """The icon of a renamed tab, picked for the name it had then."""
+    """An icon request tied to a particular tab name."""
 
     name: str
     refresh: bool = False  # picked anew rather than from namer's cache
@@ -614,15 +566,10 @@ class TabIcon:
 
 
 class PickedIcons:
-    """Icons for renamed tabs picked by the namer script, kept on each tab as
-    a TabIcon. A tab's icon is picked again whenever it is renamed, or when
-    name_tab.py asks for it to be, unless name_tab.py picked it along with the
-    tab's name. Tabs waiting for an icon are picked together
-    in the background, one run at a time.
+    """Batch icon requests into one background namer process at a time.
 
-    The names tabs are renamed from are forgotten by namer in its next run, so
-    that a tab renamed back to one gets an icon picked with namer's current
-    logic rather than its cached one."""
+    Forget old names when tabs are renamed, so reusing a name gets a fresh icon.
+    """
 
     def __init__(self) -> None:
         self.queue = []  # (tab id, TabIcon) waiting for the next run, oldest first
@@ -647,8 +594,7 @@ class PickedIcons:
                     if self.forget:
                         add_timer(self._run, 0, False)
                     return icon
-                # Renamed since, which tabs whose status tag hides their icon
-                # can be before it is ever drawn
+                # A status tag can hide the icon across several renames.
                 refresh = False
             tab_icon = TabIcon(tab.name, refresh)
             setattr(tab, TAB_ICON_ATTR, tab_icon)
@@ -735,15 +681,13 @@ class PickedIcons:
 
 
 def _shared(name: str, create, retire=None):
-    """The object called name, created on first use and shared by every copy
-    of this module. kitty runs this file again when its config is reloaded, so
-    state is kept on the boss, which outlives reloads, to stop each copy from
-    adding its own timer and running its own refreshes.
+    """Share state across module copies without duplicating timers or refreshes.
 
-    An object created by an earlier copy runs that copy's code, which may have
-    changed since, so it is replaced, after retire(old, new) stops its timers
-    and hands over its work. Callbacks of earlier copies that are still running
-    get the latest copy's object."""
+    kitty reloads this module before it stops drawing with the previous copy,
+    so code edits take two config reloads to appear. State lives on the boss,
+    which survives reloads. Older callbacks get the newest object. When supplied,
+    retire(old, new) stops old timers or hands pending work to the replacement.
+    """
     boss = get_boss()
     attr = f"tab_bar_shared_{name}"
     shared = getattr(boss, attr, None)  # (load time of its copy, object)
@@ -751,8 +695,7 @@ def _shared(name: str, create, retire=None):
     if shared is not None and shared[0] >= LOADED_AT:
         return shared[1]
 
-    # Copies from before objects were stored with their copy's load time
-    # stored them alone, under another name
+    # Accept state from modules loaded before the timestamped storage format.
     if hasattr(boss, legacy_attr := f"tab_bar_{name}"):
         shared = (float("-inf"), getattr(boss, legacy_attr))
         delattr(boss, legacy_attr)
@@ -770,9 +713,7 @@ def _remove_timer(timer_id) -> None:
 
 
 class Spinner:
-    """Animates the spinner of tabs that are waiting, see _is_waiting. Frames
-    follow the clock rather than a count of redraws, so that redraws for other
-    reasons never make it skip ahead and every spinner turns in step."""
+    """Use elapsed time to keep spinners in sync, regardless of redraw frequency."""
 
     def __init__(self) -> None:
         self.timer_id = None
@@ -796,14 +737,13 @@ class Spinner:
             for tm in get_boss().os_window_map.values()
             if any(_is_waiting(t) for t in tm.tabs)
         ]
-        # Stops once no tab is waiting, until frame() is called again.
         if tab_managers:
             self._schedule()
             _mark_tab_bar_dirty(*tab_managers)
 
 
 def _hand_over_icons(old: PickedIcons, new: PickedIcons) -> None:
-    # A run of the old one in progress still finishes, updating its tabs.
+    # Leave any running request to finish; transfer only pending work.
     new.queue, old.queue = getattr(old, "queue", []), []
     new.forget, old.forget = getattr(old, "forget", set()), set()
     if new.queue or new.forget:
@@ -984,16 +924,20 @@ def _is_naming(tab) -> bool:
 
 
 def _program_states(tab) -> set[str]:
-    """The states that programs in the windows of tab report.
+    """Collect program states reported through OSC 7501.
 
-    Programs such as Claude Code and Codex report their state with OSC 7501,
-    which kitty keeps on each window as its program_status. "working" and
-    "blocked" stay until the program moves on, and "done" and "error" until the
-    user has seen the window, see program_status_seen.py."""
+    Blocked states with a kind also appear as "blocked:<kind>". Working and
+    blocked states persist until the program changes them; completion and
+    error states persist until the user sees the window.
+    """
+    states = set()
     # kitty < 0.50.0 has no program_status
-    return {
-        record.state.value for w in tab for record in getattr(w, "program_status", ())
-    }
+    for w in tab:
+        for record in getattr(w, "program_status", ()):
+            states.add(record.state.value)
+            if (kind := getattr(record, "kind", None)) is not None:
+                states.add(f"{record.state.value}:{kind.value}")
+    return states
 
 
 def _is_working(tab) -> bool:
@@ -1001,8 +945,6 @@ def _is_working(tab) -> bool:
 
 
 def _is_waiting(tab) -> bool:
-    """Whether tab shows a spinner, while being named, waiting for its icon, or
-    a program in it is working."""
     tab_icon = getattr(tab, TAB_ICON_ATTR, None)
     return (
         _is_naming(tab)
@@ -1011,26 +953,34 @@ def _is_waiting(tab) -> bool:
     )
 
 
+def _status_icon(tab) -> str | None:
+    """An icon for the most urgent program state, or a spinner while busy."""
+    states = _program_states(tab)
+
+    if _is_naming(tab):
+        states.add("working")
+    for state, icon in PROGRAM_STATE_ICONS.items():
+        if state in states:
+            return icon or _spinner().frame()
+    return None
+
+
 def _tab_title(tab: TabBarData) -> str:
     # Tabs renamed with set_tab_title keep their full name, marked with an icon.
     t = get_boss().tab_for_id(tab.tab_id)
-    spinner = (
-        _spinner().frame()
-        if t is not None and (_is_naming(t) or _is_working(t))
-        else None
-    )
+    status_icon = _status_icon(t) if t is not None else None
 
     if t is not None and t.name:
         match = STATUS_TAG.match(t.name)
 
         if match and (icon := STATUS_TAG_ICONS.get(match.group(1).lower())):
-            return f"{spinner or icon} {t.name[match.end() :]}".rstrip()
-        return f"{spinner or _renamed_tab_icon(t)} {tab.title}"
+            return f"{status_icon or icon} {t.name[match.end() :]}".rstrip()
+        return f"{status_icon or _renamed_tab_icon(t)} {tab.title}"
 
     short = (
         tab.title if t is not None and _shows_full_title(t) else _short_title(tab.title)
     )
-    return f"{spinner} {short}" if spinner else short
+    return f"{status_icon} {short}" if status_icon else short
 
 
 def _stack_suffix(tab: TabBarData) -> str:
@@ -1047,11 +997,11 @@ def _stack_suffix(tab: TabBarData) -> str:
 
 
 def _attention_color(tab: TabBarData) -> int | None:
-    """The colour of tab while one of its windows waits on the user, by the most
-    urgent thing it waits on, or None if none do: a program blocked on the user
-    or that failed (see _program_states), or one that finished or rang the
-    bell. needs_attention is set by a bell in a window that wasn't focused,
-    until it is."""
+    """Choose a tab colour, prioritising blocked programs, then errors.
+
+    Completed programs and bells use the theme's active border colour.
+    Return None when the tab needs no attention.
+    """
     t = get_boss().tab_for_id(tab.tab_id)
     states = _program_states(t) if t is not None else set()
 
@@ -1067,7 +1017,6 @@ def _attention_color(tab: TabBarData) -> int | None:
 
 
 def _dimmed(color: int) -> int:
-    """color as drawn on inactive tabs, see INACTIVE_TAB_SATURATION."""
     r, g, b = (((color >> shift) & 0xFF) / 255 for shift in (16, 8, 0))
     h, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
     r, g, b = colorsys.hls_to_rgb(
@@ -1079,10 +1028,7 @@ def _dimmed(color: int) -> int:
 
 
 def _attention_colors(tab: TabBarData) -> TabBarData:
-    """tab drawn in its _attention_color if it is active, or else in a dimmed
-    variant of it, if it has one. The title template in tab_bar.conf draws tabs
-    in the tab colours of kitty's options, which colours set on a tab take
-    precedence over, see DrawData.tab_bg."""
+    """Override theme colours when a tab needs attention, dimming inactive tabs."""
     c = _attention_color(tab)
 
     if c is None:
@@ -1101,10 +1047,10 @@ def _fit_title(
     max_tab_length: int,
     suffix: str = "",
 ) -> TabBarData:
-    """tab with suffix appended to its title, shortened to an ellipsis before
-    suffix, so that the whole tab fits in max_tab_length cells. Otherwise kitty
-    draws its own ellipsis over the last cell of the tab, cutting off suffix and
-    whatever the title template draws after the title."""
+    """Shorten the title while preserving the suffix and tab decorations.
+
+    kitty's own truncation can cut these off.
+    """
     template = apply_title_template(draw_data, tab._replace(title=""), index)
     room = (
         max_tab_length
