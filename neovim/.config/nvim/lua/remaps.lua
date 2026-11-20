@@ -67,6 +67,9 @@ vim.keymap.set({ 'n', 'v' }, '<leader>.', vim.lsp.buf.code_action, { desc = 'Sho
 -- Fix InsertLeave not firing
 vim.keymap.set('i', '<C-c>', '<Esc>')
 
+-- Match macOS opt+backspace
+vim.keymap.set('i', '<M-BS>', '<C-w>', { desc = 'Delete word before cursor' })
+
 vim.keymap.set('n', '<leader>s', ':%s/', { desc = 'Begin grep in file' })
 
 vim.keymap.set('n', '<leader>v', 'vin', { remap = true, desc = 'Select word/symbol under cursor' })
