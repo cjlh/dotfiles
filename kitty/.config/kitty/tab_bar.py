@@ -101,7 +101,7 @@ TAB_ICON_ATTR = "tab_bar_icon"
 
 # Icons for program states in priority order, matching the tab colour priority.
 # Keys are a state, or "blocked:<kind>" for why a program is blocked. None
-# shows the spinner.
+# shows the working spinner.
 PROGRAM_STATE_ICONS = {
     "blocked:permission": "⊘",
     "blocked:question": "◌",
@@ -112,7 +112,9 @@ PROGRAM_STATE_ICONS = {
     "done": "⊙",
 }
 
-SPINNER_FRAMES = "◐◓◑◒"
+SPINNER_FRAMES = "⠦⠖⠲⠴"
+# Programs that report the working state get their own spinner.
+WORKING_SPINNER_FRAMES = "◐◓◑◒"
 SPINNER_INTERVAL = 0.12  # seconds
 
 STACK_LAYOUT = "stack"
@@ -718,11 +720,11 @@ class Spinner:
     def __init__(self) -> None:
         self.timer_id = None
 
-    def frame(self) -> str:
+    def frame(self, frames: str = SPINNER_FRAMES) -> str:
         if self.timer_id is None:
             self._schedule()
-        index = int(time.monotonic() / SPINNER_INTERVAL) % len(SPINNER_FRAMES)
-        return SPINNER_FRAMES[index]
+        index = int(time.monotonic() / SPINNER_INTERVAL) % len(frames)
+        return frames[index]
 
     def _schedule(self) -> None:
         # Tick a quarter of the way into the next frame, so that a slightly
@@ -957,11 +959,12 @@ def _status_icon(tab) -> str | None:
     """An icon for the most urgent program state, or a spinner while busy."""
     states = _program_states(tab)
 
-    if _is_naming(tab):
-        states.add("working")
     for state, icon in PROGRAM_STATE_ICONS.items():
+        # Naming a tab ranks alongside working, with the usual spinner.
+        if icon is None and _is_naming(tab):
+            return _spinner().frame()
         if state in states:
-            return icon or _spinner().frame()
+            return icon or _spinner().frame(WORKING_SPINNER_FRAMES)
     return None
 
 
