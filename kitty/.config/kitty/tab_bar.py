@@ -14,14 +14,19 @@
 # Names starting with a status tag, such as "[done] some task", show the
 # status's icon in place of the tag instead, see STATUS_TAG_ICONS.
 #
-# While name_tab.py generates a tab's name, or namer picks its icon, the icon
-# is replaced by a spinner, which a timer animates only while some tab is
+# While name_tab.py generates a tab's name, namer picks its icon, or a program
+# in the tab reports that it is working (see _program_states), the icon is
+# replaced by a spinner, which a timer animates only while some tab is
 # waiting. Redraws that change nothing but what is drawn, such as the spinner's,
 # set DRAW_ONLY_ATTR so that watchers can skip their work, see
 # _mark_tab_bar_dirty.
 #
 # Tabs in the stack layout with more than one window show an indicator per
 # window after their title. Choose its style in tab_bar.toml under [tabs].
+#
+# Tabs with a window waiting on the user are drawn in a colour for what it waits
+# on, see _attention_color: a program blocked on the user, a program that failed,
+# or a program that finished or rang the bell while the user wasn't looking.
 #
 # kitty runs this file again when its config is reloaded, see _shared. It draws
 # with the copy loaded by the previous reload though, as it only forgets that
@@ -46,6 +51,7 @@ from kitty.constants import clear_handled_signals, config_dir, kitty_exe
 from kitty.fast_data_types import (
     Screen,
     add_timer,
+    get_options,
     remove_timer,
     wakeup_main_loop,
     wcswidth,
@@ -59,7 +65,8 @@ from kitty.tab_bar import (
     draw_tab_with_separator,
     truncate_line,
 )
-from kitty.utils import log_error
+from kitty.rgb import to_color
+from kitty.utils import color_as_int, log_error
 
 # Optional per-machine tab bar settings. See tab_bar.example.toml.
 CONFIG_PATH = os.path.join(config_dir, "tab_bar.toml")
@@ -160,6 +167,16 @@ class StackIndicator:
         )
 
 
+@dataclass(frozen=True)
+class TabColors:
+    """Colours of tabs with a program blocked on the user, or that failed, see
+    _attention_color. Those with one that finished, or that rang the bell, use
+    active_border_color."""
+
+    blocked: int = 0xDE7500
+    error: int = 0xC90A0A
+
+
 def _load_config() -> dict:
     try:
         with open(CONFIG_PATH, "rb") as f:
@@ -198,6 +215,30 @@ def _load_stack_indicator() -> StackIndicator:
 
 def _stack_indicator() -> StackIndicator:
     return _shared("stack_indicator", _load_stack_indicator)
+
+
+def _load_tab_colors() -> TabColors:
+    try:
+        tabs = _config().get("tabs", {})
+        if not isinstance(tabs, dict):
+            raise TypeError("tabs must be a table")
+        values = {}
+        for field, key in (
+            ("blocked", "blocked-tab-color"),
+            ("error", "error-tab-color"),
+        ):
+            if key in tabs:
+                if not isinstance(tabs[key], str):
+                    raise TypeError(f"{key} must be a string")
+                values[field] = color_as_int(to_color(tabs[key], validate=True))
+        return TabColors(**values)
+    except (TypeError, ValueError) as e:
+        log_error(f"tab_bar.py: invalid tabs settings in {CONFIG_PATH}: {e!r}")
+        return TabColors()
+
+
+def _tab_colors() -> TabColors:
+    return _shared("tab_colors", _load_tab_colors)
 
 
 def _statvfs_capacity(path: str) -> int:
@@ -935,16 +976,42 @@ def _is_naming(tab) -> bool:
     return getattr(tab, NAMING_ATTR, None) is not None
 
 
+def _program_states(tab) -> set[str]:
+    """The states that programs in the windows of tab report.
+
+    Programs such as Claude Code and Codex report their state with OSC 7501,
+    which kitty keeps on each window as its program_status. "working" and
+    "blocked" stay until the program moves on, and "done" and "error" until the
+    user has seen the window, see program_status_seen.py."""
+    # kitty < 0.50.0 has no program_status
+    return {
+        record.state.value for w in tab for record in getattr(w, "program_status", ())
+    }
+
+
+def _is_working(tab) -> bool:
+    return "working" in _program_states(tab)
+
+
 def _is_waiting(tab) -> bool:
-    """Whether tab shows a spinner, while being named or waiting for its icon."""
+    """Whether tab shows a spinner, while being named, waiting for its icon, or
+    a program in it is working."""
     tab_icon = getattr(tab, TAB_ICON_ATTR, None)
-    return _is_naming(tab) or (tab_icon is not None and tab_icon.is_loading)
+    return (
+        _is_naming(tab)
+        or (tab_icon is not None and tab_icon.is_loading)
+        or _is_working(tab)
+    )
 
 
 def _tab_title(tab: TabBarData) -> str:
     # Tabs renamed with set_tab_title keep their full name, marked with an icon.
     t = get_boss().tab_for_id(tab.tab_id)
-    spinner = _spinner().frame() if t is not None and _is_naming(t) else None
+    spinner = (
+        _spinner().frame()
+        if t is not None and (_is_naming(t) or _is_working(t))
+        else None
+    )
 
     if t is not None and t.name:
         match = STATUS_TAG.match(t.name)
@@ -970,6 +1037,38 @@ def _stack_suffix(tab: TabBarData) -> str:
     active = t.windows.active_group_idx
     markers = _stack_indicator().render(len(t.windows.groups), active)
     return " " + markers if markers else ""
+
+
+def _attention_color(tab: TabBarData) -> int | None:
+    """The colour of tab while one of its windows waits on the user, by the most
+    urgent thing it waits on, or None if none do: a program blocked on the user
+    or that failed (see _program_states), or one that finished or rang the
+    bell. needs_attention is set by a bell in a window that wasn't focused,
+    until it is."""
+    t = get_boss().tab_for_id(tab.tab_id)
+    states = _program_states(t) if t is not None else set()
+
+    if "blocked" in states:
+        return _tab_colors().blocked
+    if "error" in states:
+        return _tab_colors().error
+    color = get_options().active_border_color
+    # active_border_color can be "none"
+    if ("done" in states or tab.needs_attention) and color is not None:
+        return color_as_int(color)
+    return None
+
+
+def _attention_colors(tab: TabBarData) -> TabBarData:
+    """tab drawn in its _attention_color, if it has one. The title template in
+    tab_bar.conf draws tabs in the tab colours of kitty's options, which colours
+    set on a tab take precedence over, see DrawData.tab_bg."""
+    c = _attention_color(tab)
+
+    if c is None:
+        return tab
+
+    return tab._replace(active_fg=c, active_bg=c, inactive_fg=c, inactive_bg=c)
 
 
 def _fit_title(
@@ -1011,7 +1110,7 @@ def draw_tab(
 ) -> int:
     _shared("timer", _start_timer, lambda old, new: _remove_timer(old))
 
-    tab = tab._replace(title=_tab_title(tab))
+    tab = _attention_colors(tab._replace(title=_tab_title(tab)))
 
     # Kitty leaves an extra unused cell per tab, which accumulates at status area. Let
     # the last tab use this space.
