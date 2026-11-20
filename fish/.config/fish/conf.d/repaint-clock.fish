@@ -1,5 +1,5 @@
 if status is-interactive
-      # Perform a final prompt render immediately before command execution
+      # Refresh the prompt once more before running a command.
       set -g fish_transient_prompt 1
 
       function __prompt_clock_repaint --on-signal SIGUSR1
@@ -10,8 +10,8 @@ if status is-interactive
       if not set -q __prompt_clock_pid
           or not kill -0 $__prompt_clock_pid 2>/dev/null
 
-          # Detach the timer from this shell's stdio. Otherwise anything reading this shell's output, such as
-          # an editor resolving the shell environment, waits until the timer exits (up to a minute).
+          # Disconnect stdio so programs reading this shell's output don't wait
+          # for the background timer to exit.
           fish --no-config -c '
               while kill -0 $argv[1] 2>/dev/null
                   # Wake at the beginning of the next minute.

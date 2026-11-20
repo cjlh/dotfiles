@@ -213,3 +213,16 @@ end
 function du-projects --description "Disk usage of every repo/worktree root under ~/Projects, sorted by size"
     du-repos ~/Projects
 end
+
+function codediff --description 'Review current repository changes in CodeDiff'
+    argparse 'i/inline' -- $argv
+    or return
+
+    set -l layout --side-by-side
+
+    if set -q _flag_inline
+        set layout --inline
+    end
+
+    command nvim "+CodeDiff $layout" $argv
+end
