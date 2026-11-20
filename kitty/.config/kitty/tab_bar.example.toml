@@ -21,7 +21,8 @@ stacked-window-indicator-separator = ""
 # Colours of tabs with a program that is blocked on the user, or that failed,
 # as reported by programs such as Claude Code and Codex. Colours are "#rrggbb",
 # or a colour name kitty knows. Tabs with a program that finished, or that rang
-# the bell, use active_border_color from kitty's theme.
+# the bell, use active_border_color from kitty's theme. These are the colours of
+# the active tab. Inactive tabs use a dimmed variant of them.
 blocked-tab-color = "#de7500"
 error-tab-color = "#c90a0a"
 

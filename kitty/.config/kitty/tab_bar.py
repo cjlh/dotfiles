@@ -27,12 +27,14 @@
 # Tabs with a window waiting on the user are drawn in a colour for what it waits
 # on, see _attention_color: a program blocked on the user, a program that failed,
 # or a program that finished or rang the bell while the user wasn't looking.
+# Inactive tabs use a dimmed variant of the colour, see INACTIVE_TAB_SATURATION.
 #
 # kitty runs this file again when its config is reloaded, see _shared. It draws
 # with the copy loaded by the previous reload though, as it only forgets that
 # copy after applying the reloaded config, so edits here take two reloads.
 # See: https://github.com/kovidgoyal/kitty/discussions/4447
 
+import colorsys
 import json
 import os
 import re
@@ -144,6 +146,11 @@ SPINNER_FRAMES = "⠦⠖⠲⠴"
 SPINNER_INTERVAL = 0.12  # seconds
 
 STACK_LAYOUT = "stack"
+
+# Inactive tabs draw their _attention_color with its saturation and lightness
+# scaled by these, so that the active tab stands out
+INACTIVE_TAB_SATURATION = 0.6
+INACTIVE_TAB_LIGHTNESS = 0.75
 
 # Set on a tab manager while its tab bar is marked dirty only to be redrawn,
 # with nothing about its tabs or windows changed. on_tab_bar_dirty is called
@@ -1059,16 +1066,32 @@ def _attention_color(tab: TabBarData) -> int | None:
     return None
 
 
+def _dimmed(color: int) -> int:
+    """color as drawn on inactive tabs, see INACTIVE_TAB_SATURATION."""
+    r, g, b = (((color >> shift) & 0xFF) / 255 for shift in (16, 8, 0))
+    h, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
+    r, g, b = colorsys.hls_to_rgb(
+        h,
+        lightness * INACTIVE_TAB_LIGHTNESS,
+        saturation * INACTIVE_TAB_SATURATION,
+    )
+    return (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)
+
+
 def _attention_colors(tab: TabBarData) -> TabBarData:
-    """tab drawn in its _attention_color, if it has one. The title template in
-    tab_bar.conf draws tabs in the tab colours of kitty's options, which colours
-    set on a tab take precedence over, see DrawData.tab_bg."""
+    """tab drawn in its _attention_color if it is active, or else in a dimmed
+    variant of it, if it has one. The title template in tab_bar.conf draws tabs
+    in the tab colours of kitty's options, which colours set on a tab take
+    precedence over, see DrawData.tab_bg."""
     c = _attention_color(tab)
 
     if c is None:
         return tab
 
-    return tab._replace(active_fg=c, active_bg=c, inactive_fg=c, inactive_bg=c)
+    dimmed = _dimmed(c)
+    return tab._replace(
+        active_fg=c, active_bg=c, inactive_fg=dimmed, inactive_bg=dimmed
+    )
 
 
 def _fit_title(
