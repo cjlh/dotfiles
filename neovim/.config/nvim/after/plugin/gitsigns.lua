@@ -44,7 +44,7 @@ end, { desc = 'Stage selected hunks (gitsigns)' })
 
 vim.keymap.set('v', '<leader>GH', function()
     gitsigns.reset_hunk { vim.fn.line '.', vim.fn.line 'v' }
-end, { desc = 'Unstage selected hunks (gitsigns)' })
+end, { desc = 'Reset selected hunks (gitsigns)' })
 
 vim.keymap.set('n', '<leader>Ga', gitsigns.stage_buffer, { desc = 'Stage current buffer (gitsigns)' })
 vim.keymap.set('n', '<leader>Gr', gitsigns.reset_buffer, { desc = 'Reset current buffer (gitsigns)' })

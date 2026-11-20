@@ -8,35 +8,15 @@
 # default = true
 # ///
 
-# Names things with on-device models: picks icons to show next to names, such as
-# renamed kitty tabs, and names kitty tabs after the task they are being used
-# for.
+# Pick icons and name terminal tabs using on-device models.
+# d1-2B selects icons and checks whether a tab has a clear task; Titlewen or
+# Apple's Foundation model generates the name. Without d1-2B, icons fall back
+# to a stable hash. Tabs are left unnamed when the naming model is unavailable.
 #
-# On Apple silicon, LiquidAI's d1-2B decision model picks the icon whose meaning
-# best matches a name, and decides whether a tab shows enough of what the user
-# is doing to name it. The name is written by the model --model picks:
-# Titlewen, a small title model, or Apple's on-device Foundation model on macOS
-# 26 and later. Without d1-2B icons are picked from a hash of the name, and
-# without the naming model tabs aren't named. Either way a name always gets the
-# same icon, as icons are cached, until it is picked anew with --refresh or by
-# naming a tab with that name.
-#
-# d1-2B and Titlewen run in llama.cpp's llama-server, one server per run in its
-# router mode, which serves each model from a process of its own (see
-# LlamaServer). On first use namer downloads a pinned llama.cpp release (16 MB)
-# and the models' GGUF files (d1-2B 1.8 GB, Titlewen 1.2 GB), checking each
-# against its sha256, into its cache directory.
-#
-# Apple's SDK is only added to a second run of this script (see run_second)
-# rather than declared above, where a failing install would stop the script
-# starting. It is built from source, which takes a while and needs Xcode 26 or
-# later. Without a model a warning is shown, in yellow when run from a terminal
-# and otherwise as a notification only the first time for each kind of
-# warning.
-# See: https://github.com/ggml-org/llama.cpp/tree/master/tools/server,
-# https://huggingface.co/LiquidAI/d1-2B-GGUF,
-# https://huggingface.co/efficiencyx/Titlewen-GGUF and
-# https://apple.github.io/python-apple-fm-sdk/
+# On first use, namer verifies the pinned llama.cpp and model downloads against
+# their SHA-256 hashes. The model downloads are about 1.8 GB for d1-2B and 1.2 GB for Titlewen.
+# Apple's SDK loads in a separate process so installation failures do not
+# prevent the other commands from running.
 
 import asyncio
 import fcntl
@@ -66,10 +46,8 @@ from typing import Annotated, Collection, Optional
 
 import typer
 
-# Model-based selection uses the name and description of each icon. Note adding or
-# modifying the icon list causes all cached icons to be re-picked. Kept short, as
-# d1-2B reads every description for each icon picked, see
-# experiments/icon-set-reduction.
+# Keep descriptions short: the model reads every one for each icon request.
+# Changing the list invalidates all cached choices.
 ICONS = {
     "alternative-key": (
         "⎇",
@@ -122,31 +100,23 @@ ICONS = {
     "squared-plus": ("⊞", "notebooks, Jupyter, tables, spreadsheets"),
     "chess-bishop": ("♝", "strategy, planning, roadmaps, management, games"),
     "circle-arrow": ("↻", "retries, refreshing, reloading, loops"),
-    # Render poorly with the current font
-    # "ferry": ("⛴", "containers, Docker, images"),
-    # "chains": ("⛓", "dependencies, supply chain, linking"),
 }
 
-# d1-2B's questions, as evaluated in experiments/decision-model-evaluation.
-# The icon is picked from the name alone, so a name gets the same icon however
-# it was given.
+# Use only the name so icon selection is independent of the tab's contents.
 ICON_QUESTION = {
     "type": "choice",
     "instructions": "Which icon's meaning best matches this tab name?",
     "criteria": {icon_id: meaning for icon_id, (_, meaning) in ICONS.items()},
 }
-# Picking a name's icon anew goes to the next likeliest of this many of
-# d1-2B's likeliest icons, then back to the likeliest
+# Cached requests keep their icon. With --refresh, cycle through the top choices.
 REPICK_ICONS = 5
 PURPOSE_QUESTION = {
     "type": "noul",
     "instructions": "Has the user done something in this tab that shows what they "
     "are working on?",
 }
-# P(yes) from which a tab counts as having a purpose. With the Q8_0 build on
-# llama.cpp, any threshold from 0.25 to 0.42 was right on 21 of the 22 tabs
-# labelled in experiments/decision-model-evaluation. Each naming records P(yes)
-# to revisit it.
+# Minimum P(yes) required to name a tab. Record the score with each result
+# so the threshold can be evaluated against saved contexts.
 PURPOSE_THRESHOLD = 0.25
 
 
@@ -315,17 +285,15 @@ MODEL_UNAVAILABLE_WARNINGS = {
     "UNKNOWN": "model-unavailable",
 }
 
-# Only send each kind of warning notification once - do not warn if its file exists
+# Marker files suppress repeated notifications for the same warning.
 WARNED_PATH = os.path.join(CACHE_DIR, ".warned-{kind}")
 
 GIT_TIMEOUT = 2  # seconds per git command
 GIT_STATUS_LINES = 10
 GIT_LOG_COMMITS = 5
 
-# The tab context leaves out what repeats or only decorates, which d1-2B takes
-# about 1.8 ms a token to read, while keeping each window's screen close to
-# verbatim: rewritten as a summary of facts, idle tabs looked purposeful to it.
-# See experiments/context-compaction.
+# Remove repeated text and terminal decoration, but preserve screen content.
+# Summarising it can make idle tabs look like active tasks.
 SCREEN_LINES = 25  # last lines of each window's screen
 OUTPUT_LINES = 8  # of each command's output, its first 3 and the rest its last
 AGENT_MESSAGES = 2  # the user's last messages to an agent
@@ -764,8 +732,7 @@ def warn(kind: str, message: str | None = None) -> None:
 
 
 def sdk_buildable() -> bool:
-    """Whether the SDK can be built here, warning why not if Xcode is the
-    reason."""
+    """Check SDK prerequisites and warn about Xcode configuration problems."""
     if not model_supported():
         return False
 
@@ -777,9 +744,10 @@ def sdk_buildable() -> bool:
 
 
 def run_second(args: list[str]) -> bool:
-    """Runs this script again with args and Apple's SDK, which uv builds on
-    first use and caches, returning whether that run succeeded. Its output and
-    errors go wherever ours do, such as the logs name_tab.py keeps."""
+    """Rerun with Apple's optional SDK and report whether it succeeded.
+
+    uv builds and caches the SDK on first use. Output inherits our streams.
+    """
     uv = os.environ.get("UV") or shutil.which("uv")
 
     if uv is None:
@@ -824,17 +792,16 @@ def load_model():
 
 
 class LlamaError(Exception):
-    """llama.cpp or a model couldn't be downloaded, started or asked."""
+    """A failure to download, start, or query llama.cpp or a model."""
 
 
 def llama_models(mode: TabNamingMode) -> list[Gguf]:
-    """The models llama-server runs to name tabs in a mode."""
+    """Return the models required by the selected naming mode."""
     return [D1, *([NAMING_GGUFS[mode]] if mode in NAMING_GGUFS else [])]
 
 
 def download(url: str, path: str, sha256: str, what: str) -> None:
-    """Downloads url to path unless it is there, checking its sha256. Runs at
-    the same time wait for each other's download rather than repeat it."""
+    """Download and checksum a missing file, sharing the download across processes."""
     if os.path.exists(path):
         return
 
@@ -922,8 +889,7 @@ def model_path(gguf: Gguf) -> str:
 
 
 def llama_preset(paths: dict[str, str]) -> str:
-    """llama-server's preset for the models at paths, by name, each loaded as
-    the server starts."""
+    """Build a llama-server preset that loads the named models at startup."""
     lines = ["version = 1", "", "[*]", f"c = {LLAMA_CONTEXT}"]
 
     for name, path in paths.items():
@@ -939,11 +905,8 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-# Runs llama-server until the run of namer that started it exits, even if it is
-# killed: the router has no way to notice, unlike the server it starts for each
-# model, which exits when the router does. Stops it on SIGTERM too. When namer
-# exits first it can't have removed its temporary directory, which is removed
-# here instead.
+# The router does not detect when namer exits. Watch both processes so the
+# server is stopped and temporary files are removed even if namer is killed.
 WATCHDOG = """\
 import select, shutil, signal, subprocess, sys
 
@@ -986,10 +949,10 @@ while True:
 
 
 class LlamaServer:
-    """llama-server in router mode running models for the length of a with
-    block, listening on a free local port with a key of its own. Each model is
-    loaded as it starts, in a server process of its own, and a request for a
-    model waits until it is loaded."""
+    """Manage a local llama-server router for the duration of a with block.
+
+    Each model runs in its own process. Requests wait for model loading.
+    """
 
     def __init__(self, models: list[Gguf]) -> None:
         self.models = models
@@ -1246,11 +1209,8 @@ def repository_context(root: str) -> list[str]:
     if len(status) > GIT_STATUS_LINES:
         lines.append(f"... and {len(status) - GIT_STATUS_LINES} more")
 
-    # Only history that is likely this tab's own work, as the repository's
-    # history would otherwise be taken as the tab's purpose: the branch's
-    # commits, or on the base branch those not yet pushed. Every commit of a
-    # repository without remotes is unpushed. Their diff stat isn't given, as
-    # it mostly repeats the changed files.
+    # Include branch-specific or unpushed commits so unrelated repository history
+    # does not get mistaken for the tab's purpose.
     base = base_branch(root)
     merge_base = git(root, "merge-base", "HEAD", base) if base else None
     if merge_base and branch not in (base, base.split("/")[-1]):
@@ -1276,7 +1236,7 @@ def home_relative(path: str) -> str:
 
 
 def clip(text: str, chars: int) -> str:
-    """text on one line, cut at a word to at most chars characters."""
+    """Fit text on one line, truncating at a word boundary."""
     text = " ".join(text.split())
     if len(text) <= chars:
         return text
@@ -1290,9 +1250,10 @@ def first_sentence(text: str, chars: int) -> str:
 
 
 def screen_context(screen: str, in_repository: bool) -> str:
-    """The screen less decoration, git's hints, status lines, padding and blank
-    runs, with long command outputs cut short and the output of git status
-    left to the Git section."""
+    """Remove terminal clutter and shorten command output for the model.
+
+    Omit git status output when repository details are already included.
+    """
     # (prompt line, or None for output whose prompt has scrolled off, output)
     segments: list[tuple[str | None, list[str]]] = [(None, [])]
     for line in screen.splitlines():
@@ -1320,8 +1281,7 @@ def screen_context(screen: str, in_repository: bool) -> str:
             if in_repository and re.match(r"git (status|diff --stat)\b", command):
                 lines.append("(as in the Git section)")
                 continue
-        # Commands mostly say what they do at the start of their output and
-        # how it went at the end
+        # Keep the start for context and the end for results.
         if len(output) > OUTPUT_LINES:
             output = [
                 *output[:3],
@@ -1360,8 +1320,7 @@ def transcript_records(path: str):
 
 
 def typed_by_user(text: str) -> bool:
-    """Whether a user message was typed rather than added by the agent, such as
-    command output, reminders or a summary of the conversation so far."""
+    """Filter out agent-generated messages such as reminders and session summaries."""
     text = text.strip()
     return bool(text) and not text.startswith(("<", "This session is being continued"))
 
@@ -1373,9 +1332,7 @@ def add_file(files: list[str], path: str) -> None:
 
 
 def claude_transcript(window: dict) -> str | None:
-    """The transcript of the Claude Code session in the window: by its pid,
-    which Claude Code records the session of, otherwise the most recent one
-    in its cwd with the window's title."""
+    """Find a Claude transcript by process ID, falling back to directory and title."""
     projects = os.path.join(CLAUDE_DIR, "projects")
     for process in window.get("processes") or []:
         try:
@@ -1447,8 +1404,7 @@ def claude_session(window: dict) -> AgentSession | None:
 
 
 def codex_session(window: dict) -> AgentSession | None:
-    """The Codex thread in the window, by the thread name Codex titles its
-    window with, "<name> | <folder>", cut short with "..."."""
+    """Find the Codex thread matching the window title's truncated thread name."""
     name = (window.get("title") or "").split(" | ")[0].strip().rstrip(".")
     index = {
         r["id"]: r.get("thread_name")
@@ -1495,8 +1451,7 @@ def codex_session(window: dict) -> AgentSession | None:
 
 
 def agent(window: dict) -> str | None:
-    """ "claude" or "codex" if the window runs Claude Code or Codex, looking
-    past processes such as caffeinate that they start in the foreground."""
+    """Identify the agent, including when a helper occupies the foreground."""
     commands = [p.get("cmdline") or [] for p in window.get("processes") or []]
     commands.append((window.get("command") or "").split())
     for command in commands:
@@ -1526,7 +1481,7 @@ def agent_context(session: AgentSession, cwd: str) -> list[str]:
 
 
 def tab_context(snapshot: dict) -> str:
-    """The context given to the models for a tab's snapshot, see tab."""
+    """Build model context from a tab snapshot."""
     windows = snapshot.get("windows") or []
     lines = ["## Tab"]
     roots: dict[str, None] = {}  # repository roots in window order
@@ -1593,9 +1548,10 @@ def normalise_label(label: str | None) -> str | None:
 
 
 def tab_analysis(fm):
-    """The class the Foundation model's analysis of a tab is generated as. Made
-    here as the SDK is only loaded in the run that has it, and subclasses of
-    generable classes lose their fields."""
+    """Build the analysis schema after the optional SDK has loaded.
+
+    Define the class here because generable subclasses lose their fields.
+    """
     # Fields are generated in order, so the label follows the evidence for it.
     # The SDK only treats Optional[str], not str | None, as optional.
     annotations = {
@@ -1605,8 +1561,7 @@ def tab_analysis(fm):
         "label": Optional[str],
     }
     fields = {
-        # No examples, such as the repository or branch, nor a minimum number
-        # of items, as both had the model list or invent facts to show a purpose
+        # Examples and minimum item counts can encourage invented evidence.
         "key_datapoints": fm.guide(
             "Things the user has done in this tab that the snapshot shows, "
             "empty if none",
@@ -1622,9 +1577,7 @@ def tab_analysis(fm):
         "label": fm.guide("Short task-oriented title, or none without a clear purpose"),
     }
 
-    # The schema is shown to the model with the class name as its title, so the
-    # name is a field that title can't be mistaken for, which it was when the
-    # field was also called title.
+    # Use "label" for the output field to avoid confusion with the schema title.
     analysis = fm.generable(
         type("TabAnalysis", (), {**fields, "__annotations__": annotations})
     )
@@ -1638,7 +1591,6 @@ def tab_analysis(fm):
 
 
 async def foundation_analysis(fm, context: str, temperature: float | None) -> dict:
-    """The Foundation model's analysis of the tab, see tab_analysis."""
     analysis, schema = tab_analysis(fm)
     # A fresh session per run, so earlier runs don't influence later ones
     session = fm.LanguageModelSession(instructions=TAB_INSTRUCTIONS)
@@ -1662,11 +1614,12 @@ def name_tab(
     temperature: float | None = None,
     gate: bool = True,
 ) -> dict:
-    """The tab's name and icon, with the models' reasoning, or the error the
-    Foundation model raised. d1-2B decides whether the tab has a purpose while
-    the naming model names it, so that a tab with one is named sooner. Without
-    the server (None), only in the Foundation model's mode, every tab is named
-    that it finds a purpose in, and the icon is left to `namer icon`."""
+    """Generate a name and icon, returning the reasoning or model error.
+
+    Run the purpose check and naming concurrently to reduce latency. Without
+    llama-server, the Foundation model judges purpose and icon selection is
+    left to `namer icon`.
+    """
     result = {
         "model": mode.value,
         "purpose_p": None,
@@ -1729,9 +1682,10 @@ def name_tab(
 
 
 async def count_tokens(fm, context: str) -> dict[str, int]:
-    """Tokens each part of a request to name a tab uses, which together with
-    the response must fit in the Foundation model's context window. Empty if
-    counting fails, so that the failure is reported by the run that follows."""
+    """Count request tokens by component for the Foundation model's context limit.
+
+    Return an empty result on failure; the generation attempt reports the error.
+    """
     _, schema = tab_analysis(fm)
     model = fm.SystemLanguageModel()
 

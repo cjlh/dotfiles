@@ -1,23 +1,12 @@
 # Custom kitten generated using Claude.
 #
-# Toggles a reader mode for the current window, which keeps its text to a
-# column of a fixed width in the middle, by padding the window at the sides.
-# Programs see a terminal of that width, so they wrap and lay out to it.
+# Centre terminal content in a fixed-width column using side padding.
+# Programs see the narrower terminal width and wrap their output to fit.
+# Stacked windows share the width; the tab bar aligns when no other windows
+# are visible. Narrow windows keep their configured padding.
 #
-# In the stack layout, reader mode applies to all the windows in the stack:
-# toggling it in one toggles it in all of them, and windows opened in or moved
-# to the stack take it on from the others.
-#
-# While the window is the only one visible in the active tab (or the active
-# window of the stack layout), the tab bar is kept to the same column.
-#
-# The watcher keeps the column centred when the OS window is resized, the font
-# size changes, or windows are opened, closed or moved. Windows narrower than
-# the column keep their configured padding.
-#
-# Enable with:
-#   map ctrl+alt+shift+c kitten reader_mode.py [columns]
-#   watcher reader_mode.py
+# Run as a kitten with an optional column count, and load as a watcher to
+# maintain alignment as windows change.
 
 from __future__ import annotations
 
@@ -39,17 +28,14 @@ if TYPE_CHECKING:
     from kitty.window import Window
 
 DEFAULT_COLUMNS = 120
-# The columns of a window in reader mode are kept in a user var, so that they
-# are saved with sessions, along with the padding
+# Save the column count in a user variable so it survives session restoration.
 COLUMNS_VAR = "reader_mode"
-# Set on windows padded by this module, to restore their padding when reader
-# mode is turned off
+# Track which windows need their original padding restored.
 PADDED_ATTR = "_reader_mode_padded"
 STACK_LAYOUT = "stack"
-# Must match tab_bar.py
+# Skip layout updates for redraws that only animate the tab bar.
 DRAW_ONLY_ATTR = "tab_bar_draw_only"
-# Spare pixels left over when padding, so that rounding the padding when it is
-# converted from pts to pixels never loses a column
+# Leave room for point-to-pixel rounding so it cannot cost a text column.
 SLACK_PX = 2
 
 
@@ -65,7 +51,7 @@ def _columns(window: Window | None) -> int | None:
 
 
 def _side_padding_pt(window: Window, columns: int) -> float | None:
-    "The padding in pts for each side of window to fit columns, or None for the configured padding"
+    """Calculate side padding in points, or None to use the configured padding."""
     os_window_id = window.os_window_id
     cell_width = cell_size_for_window(os_window_id)[0]
     g = window.geometry
@@ -90,7 +76,7 @@ def _side_padding_pt(window: Window, columns: int) -> float | None:
 
 
 def _set_side_padding(window: Window, pt: float | None) -> bool:
-    "Set the left and right padding of window, returning whether it changed"
+    """Set side padding and report whether it changed."""
     setattr(window, PADDED_ATTR, pt is not None)
     current = window.padding.left
     if current == pt or (
@@ -103,14 +89,14 @@ def _set_side_padding(window: Window, pt: float | None) -> bool:
 
 
 def _centred_columns(tab: Tab | None) -> int | None:
-    "The columns of the active window of tab when it is in reader mode and the only window visible"
+    """Return the reader width when the active window is the only visible window."""
     window = tab.active_window if tab is not None else None
     columns = _columns(window)
     if columns is None or window.padding.left is None:
         return None
     if not tab.has_single_window_visible():
         return None
-    # Docks (kitty >= 0.50.0), such as from dock_window.py
+    # Visible docks also prevent the text column from spanning the tab.
     iter_docks = getattr(tab.windows, "iter_dock_groups", None)
     if iter_docks is not None:
         for group in iter_docks(only_visible=True):
@@ -120,7 +106,7 @@ def _centred_columns(tab: Tab | None) -> int | None:
 
 
 def _stack(tab: Tab | None) -> list[Window]:
-    "The windows in the stack, when tab is in the stack layout, without docks and overlays"
+    """Return stacked windows, excluding docks and overlays."""
     if tab is None or tab.current_layout.name != STACK_LAYOUT:
         return []
     return [
@@ -131,7 +117,7 @@ def _stack(tab: Tab | None) -> list[Window]:
 
 
 def _sync_stack(tab: Tab) -> None:
-    "When any window in the stack is in reader mode, put all of them in it, preferring the active one's columns"
+    """Share reader mode across the stack, preferring the active window's width."""
     stack = _stack(tab)
     active = tab.active_window
     candidates = ([active] if active in stack else []) + stack
@@ -167,8 +153,7 @@ def _update_tab_bar(tm: TabManager) -> None:
     if tab_bar.margin_width != margin:
         tab_bar.margin_width = margin
         tm.layout_tab_bar()
-        # The tab bar's margins are painted over with the borders of the tabs,
-        # without this the tab bar stays drawn where it was in them
+        # Repaint the borders to clear the old tab bar from the margins.
         for tab in tm:
             tab.relayout_borders()
 
@@ -213,7 +198,6 @@ def handle_result(
     except ValueError:
         log_error(f"reader_mode: not a number of columns: {args[1]}")
         return
-    # Toggle off, unless switching to a different width
     value = None if _columns(window) == columns else str(columns)
     stack = _stack(window.tabref())
     for w in stack if window in stack else [window]:
@@ -222,15 +206,11 @@ def handle_result(
 
 
 def on_resize(boss: Boss, window: Window, data: dict[str, Any]) -> None:
-    # The OS window was resized, the font size changed, or a window was opened,
-    # closed or moved here from another OS window
     _schedule(boss, window.os_window_id)
 
 
 def on_tab_bar_dirty(boss: Boss, window: Window, data: dict[str, Any]) -> None:
-    # Another tab or window was focused, the layout changed, windows were
-    # opened or closed, or the config was reloaded, which resets the tab bar
-    # margin. Called synchronously, so defer the work.
+    # Defer layout updates until kitty has finished processing the current change.
     tm = data.get("tab_manager")
     if tm is not None and not getattr(tm, DRAW_ONLY_ATTR, False):
         _schedule(boss, tm.os_window_id)

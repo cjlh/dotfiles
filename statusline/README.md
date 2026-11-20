@@ -16,7 +16,9 @@ ExampleProject/main · fix-1234-new-label · #1234 · Gemini 4 Carbon (medium) �
 
 - The left side shows the working directory, the git branch and, in Cursor, the branch's
   open pull request. They are in mid-gray, so they don't stand out.
-  - Folders under `~/Work` and `~/Documents/Config` show without that prefix.
+  - A Git checkout shows its directory name. A linked worktree shows
+    `repository/worktree`. Both include the path below the checkout when present.
+    Outside Git, paths under the home directory start with `~`.
   - Paths with more than five folders show only the first letter of the middle folders.
   - A detached HEAD shows as `@<commit>`, with `(rebasing)` during a rebase.
   - The pull request number links to the pull request, in terminals that support OSC 8

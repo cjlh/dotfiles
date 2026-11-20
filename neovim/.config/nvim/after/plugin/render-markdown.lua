@@ -3,14 +3,12 @@ local render_markdown = require 'render-markdown'
 render_markdown.setup {
     pipe_table = { enabled = true },
     checkbox = { enabled = true },
-
-    -- Block quote colours, plus callouts, which are drawn as part of block quotes
     quote = { enabled = true },
 
-    -- Conceal link destinations so only the link text shows (level 3 also hides replaced characters)
+    -- Hide link destinations while keeping replacement characters visible
     win_options = { conceallevel = { rendered = 2 } },
 
-    -- Match the raw markdown list marker colour rather than the plugin default of Normal
+    -- Keep rendered bullets the same colour as the original list markers
     bullet = { enabled = true, highlight = '@markup.list' },
 
     -- Render only plain links

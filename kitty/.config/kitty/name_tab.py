@@ -1,26 +1,8 @@
 # Custom kitten generated using Claude.
 #
-# Prototype that names the active tab after the task it is being used for. A
-# snapshot of the tab's windows (titles, working directories, running programs
-# and their processes, last commands and screen text) is named in the
-# background by the namer script from this repo's scripts package, which adds
-# the state of the Git repositories they are in and replaces the screens of
-# Claude Code and Codex with their transcripts. A decision model, d1-2B,
-# decides whether it shows what the tab is being used for while the model
-# TAB_NAMING_MODE names it, and d1-2B then picks an icon for the name.
-#
-# While it runs the tab keeps its name, with a spinner drawn by tab_bar.py in
-# place of its icon. It is then renamed with the generated name and icon, unless
-# the models find no clear purpose or fail, or the tab was renamed meanwhile. A
-# status tag such as "[todo]" at the start of the previous name is kept. If the
-# tab isn't renamed, or no icon was picked with its name, tab_bar.py picks its
-# icon anew.
-#
-# Each context given to the models, their response (with d1-2B's probability
-# that the tab has a purpose) and any errors from namer are kept in DATA_DIR,
-# as fixtures for evaluating the models with 'namer eval'.
-#
-# Enable with: map ctrl+alt+shift+r kitten name_tab.py
+# Name the active tab from a snapshot of its windows, using namer in the background.
+# Keep any leading status tag and leave the name unchanged if no task is found.
+# Context, results, and errors are saved in DATA_DIR for inspection and evaluation.
 
 from __future__ import annotations
 
@@ -43,15 +25,12 @@ if TYPE_CHECKING:
     from kitty.window import Window
 
 DATA_DIR = os.path.expanduser("~/.local/share/kitty/tab-names")
-# Set on tabs while their name is generated, to the name they had then, so
-# that tab_bar.py draws a spinner for them. Must match NAMING_ATTR there.
+# tab_bar.py reads these tab attributes and recognises the same leading status tag.
+# The saved name signals the spinner and lets us detect a concurrent rename.
 NAMING_ATTR = "name_tab_previous_name"
-# Set on tabs to have tab_bar.py pick their icon anew, or to the name they were
-# given and the icon picked with it. Must match REPICK_ICON_ATTR there.
+# True requests a fresh icon; a (name, icon) pair supplies one directly.
 REPICK_ICON_ATTR = "tab_bar_repick_icon"
-# Must match STATUS_TAG in tab_bar.py
 STATUS_TAG = re.compile(r"\[(\w+)\]\s*")
-# Last lines of each window's screen to include
 SCREEN_LINES = 40
 # seconds; its first run on a machine downloads llama.cpp and the models (3 GB),
 # and in "apple_foundation" mode also builds Apple's SDK
@@ -59,9 +38,8 @@ NAMER_TIMEOUT = 600
 
 TabNamingMode = Literal["titlewen_f16", "apple_foundation"]
 
-# The model namer names tabs with: "titlewen_f16" is Titlewen, a small title
-# model run by llama.cpp, "apple_foundation" Apple's on-device Foundation
-# model, which needs macOS 26 and Xcode 26 or later
+# Use Titlewen via llama.cpp, or "apple_foundation" for Apple's on-device model
+# (requires macOS 26 and Xcode 26 or later).
 TAB_NAMING_MODE: TabNamingMode = "titlewen_f16"
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH,
@@ -86,10 +64,8 @@ def _screen_text(window: Window) -> str:
 
 
 def _window_snapshot(window: Window) -> dict:
-    """What namer is given about a window, see 'namer tab --help'."""
-    # The program the shell started is the oldest process in the foreground,
-    # kitty otherwise takes the newest, such as a language server started by an
-    # editor or agent
+    """Collect kitty's window state for a background naming request."""
+    # Prefer the original foreground process over helpers it may have started.
     processes = window.child.foreground_processes
     oldest = min(processes, key=lambda p: p["pid"], default=None)
     command = (oldest and oldest["cmdline"]) or window.child.cmdline
@@ -100,8 +76,7 @@ def _window_snapshot(window: Window) -> dict:
         "last_command": window.last_cmd_cmdline or None,
         "last_exit_status": window.last_cmd_exit_status,
         "screen": _screen_text(window),
-        # For namer to find the transcripts of agents such as Claude Code,
-        # which may have started processes of their own in the foreground
+        # Include all processes so namer can find agent transcripts behind helpers.
         "processes": [
             {"pid": p["pid"], "cmdline": p["cmdline"]} for p in processes
         ],
@@ -174,7 +149,6 @@ def handle_result(
 ) -> None:
     window = boss.window_id_map.get(target_window_id)
     tab = window.tabref() if window is not None else None
-    # Also refuse tabs that are already being named
     if NAMER is None or tab is None or hasattr(tab, NAMING_ATTR):
         boss.ring_bell_if_allowed()
         return
@@ -182,8 +156,7 @@ def handle_result(
     tab_id = tab.id
     snapshot_path = None
 
-    # Only what kitty knows is collected here, on its main thread, the rest by
-    # namer in the background
+    # Collect kitty state here; leave repository and transcript reads to namer.
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         stem = os.path.join(DATA_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}-tab{tab_id}")
@@ -204,7 +177,7 @@ def handle_result(
         return
 
     setattr(tab, NAMING_ATTR, tab.name)
-    # Picked once naming finishes, the spinner is shown in its place until then
+    # Defer the icon request until naming finishes.
     setattr(tab, REPICK_ICON_ATTR, True)
     tab.mark_tab_bar_dirty()
 
@@ -224,9 +197,8 @@ def handle_result(
                 f"name_tab.py: namer failed with exit code {exit_code}, see {log_path}"
             )
 
-        # namer gives no label when the models find no clear purpose
         label = result.get("label") if exit_code == 0 else None
-        # Keep names given while the model was running
+        # Preserve manual renames made while the model was running.
         if isinstance(label, str) and label and tab.name == previous_name:
             match = STATUS_TAG.match(previous_name)
             name = (match.group(0) if match else "") + label
@@ -240,7 +212,6 @@ def handle_result(
         # marking the tab bar dirty does not wake it to draw again
         wakeup_main_loop()
 
-        # Only keep logs with something in them
         try:
             if os.path.getsize(log_path) == 0:
                 os.unlink(log_path)

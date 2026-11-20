@@ -1,8 +1,7 @@
 # Helper script generated using Claude.
 #
-# Prints how much of a coding agent's subscription limits have been used, for
-# the "usage" format of tab_bar.py's status items, see
-# tab_bar.example.toml. It is run with kitty's own Python:
+# Print subscription usage as JSON for the tab bar's usage providers.
+# Run with kitty's Python:
 #
 #   kitty +launch agent_usage.py claude|codex
 #
@@ -12,10 +11,8 @@
 #   {"session": {"percent": 27.0, "resets_at": 1794595800.4},
 #    "weekly": {"percent": 6.0, "resets_at": 1794826800.4}}
 #
-# Neither tool documents a way to read its limits, so both are read the way the
-# tool's own usage screen does, see _claude_usage and _codex_usage. If a tool
-# answers with something else than expected, null is printed instead. If it
-# can't be asked at all, e.g. when offline or logged out, the exit code is 1.
+# Use the same interfaces as the agents' own usage screens. Unexpected data
+# produces null; connection or authentication failures exit with status 1.
 
 import json
 import os

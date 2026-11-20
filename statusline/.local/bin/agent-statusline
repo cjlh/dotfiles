@@ -5,47 +5,10 @@
 # dependencies = []
 # ///
 
-# Prints a one-line status line for coding agent TUIs. The left side shows where
-# the agent is working: the directory, the git branch, and the branch's open
-# pull request. The right side shows the model, its reasoning effort, and how
-# much of the context window is used:
-#
-#   ExampleProject/main · fix-1234-new-label · #1234         Opus 5.5 (high) · 62%
-#
-# The agent passes the session as JSON on stdin. Each agent has its own JSON
-# format, so --host says which one to read. In ~/.claude/settings.json:
-#
-#   "statusLine": {
-#     "type": "command",
-#     "command": "~/.local/bin/agent-statusline --host claude",
-#     "refreshInterval": 1
-#   }
-#
-# Claude Code does not re-run the command when the terminal is resized, so
-# refreshInterval re-runs it every second to follow the new width.
-#
-# In ~/.cursor/cli-config.json:
-#
-#   "statusLine": {
-#     "type": "command",
-#     "command": "~/.local/bin/agent-statusline --host cursor",
-#     "updateIntervalMs": 1000
-#   }
-#
-# Cursor re-runs the command when the session changes, at most once per
-# updateIntervalMs, but not when the terminal is resized. A right-aligned line
-# would be out of place after a resize, so in Cursor the right side follows the
-# left one instead:
-#
-#   ExampleProject/main · fix-1234-new-label · #1234 · Gemini 4 Carbon (medium) · 62%
-#
-# The line never wraps. When it does not fit, parts are dropped in this order:
-# the reasoning effort, the end of the branch name, all of the directory except
-# its last folder, then the pull request.
-#
-# Looking up the pull request with gh takes about a second, so it is cached for
-# each branch. A stale or missing entry is shown as it is, while this script
-# refreshes it in the background.
+# Render a coding agent status line from JSON on stdin.
+# --host selects the Claude Code or Cursor payload format.
+# Shows the directory, branch, model, effort, and context usage; Cursor also
+# shows the open pull request. See the package README for setup and examples.
 
 import argparse
 import hashlib
@@ -69,35 +32,24 @@ class Host(StrEnum):
     CURSOR = "cursor"
 
 
-# Folders under home whose own path adds nothing. ~/Work holds a folder for each
-# repo, with a git worktree for each branch in it, so ~/Work/ExampleProject/main
-# shows as ExampleProject/main.
-STRIPPED_ROOTS = (Path("Work"), Path("Documents/Config"))
-
-# Longer paths show only the first letter of their middle folders, as fish does.
-# The first two folders (the repo and worktree under ~/Work) and the last two
-# stay whole.
+# In deeper paths, keep the first two and last two folders in full.
 MAX_WHOLE_FOLDERS = 5
 
-# The fewest columns a shortened branch name keeps, so it stays recognisable.
 MIN_BRANCH_WIDTH = 12
-# Below this, a cut-down directory is little more than "…", so it is left out
+# Omit the directory when there is only room for an ellipsis.
 MIN_LEFT_WIDTH = 4
 MIN_GAP = 2
 
-# The context percentage fades from gray through orange to red, reaching red here
+# Reach the final warning colour at this percentage of context usage.
 CONTEXT_FULL_PERCENT = 95
-# How steeply the fade rises at the end. Higher keeps it gray for longer: at 6,
-# it stays gray up to 50% and reaches orange at 82%.
+# Higher values delay the colour change until the context is nearly full.
 CONTEXT_CURVE = 6
 
 GIT_TIMEOUT_SECONDS = 2
 GH_TIMEOUT_SECONDS = 30
-# How long a looked-up pull request is shown before it is looked up again
 PULL_REQUEST_CACHE_SECONDS = 60
 
-# SGR codes. The grays are fixed instead of following the terminal theme, as
-# the theme's bright black is too dark to read on its background.
+# Use fixed grays because the theme's bright black is too dark to read.
 DIM = "2"
 GRAY = "38;5;244"
 # The gray Claude Code uses for its own hints, such as "(shift+tab to cycle)"
@@ -119,6 +71,7 @@ class Session:
 @dataclass(frozen=True)
 class GitState:
     root: Path
+    display_root: tuple[str, ...]
     # None when HEAD is detached
     branch: str | None
     # The branch, or the commit when HEAD is detached
@@ -143,7 +96,6 @@ def terminal_text(text: str) -> str:
 class Span:
     text: str
     sgr: tuple[str, ...] = ()
-    # Makes the text a link, in terminals that support OSC 8 hyperlinks
     link: str | None = None
 
     def __post_init__(self) -> None:
@@ -244,7 +196,7 @@ def parse_cursor(text: str) -> Session:
 
 
 def clean(text: str) -> str:
-    """Removes invisible characters and runs of spaces, which some of Cursor's model names have."""
+    """Normalise invisible characters and spacing in Cursor model names."""
     visible = "".join(char for char in text if unicodedata.category(char) != "Cf")
     return " ".join(visible.split())
 
@@ -277,10 +229,18 @@ def git_state(cwd: Path) -> GitState | None:
         return None
     toplevel.check_returncode()
     root = Path(toplevel.stdout.removesuffix("\n"))
+    trees = _git(cwd, "worktree", "list", "--porcelain", "-z")
+    trees.check_returncode()
+    first = trees.stdout.split("\0\0", 1)[0].split("\0")
+    primary = Path(first[0].removeprefix("worktree "))
+    display_root = (root.name or "/",)
+    if primary != root:
+        repo_name = primary.name.removesuffix(".git") if "bare" in first else primary.name
+        display_root = (repo_name or primary.parent.name, root.name)
     branch = _git(cwd, "symbolic-ref", "--short", "--quiet", "HEAD")
     if branch.returncode == 0:
         name = branch.stdout.strip()
-        return GitState(root=root, branch=name, label=name)
+        return GitState(root=root, display_root=display_root, branch=name, label=name)
     # symbolic-ref exits with 1 when HEAD is detached
     if branch.returncode != 1:
         branch.check_returncode()
@@ -296,6 +256,7 @@ def git_state(cwd: Path) -> GitState | None:
     )
     return GitState(
         root=root,
+        display_root=display_root,
         branch=None,
         label=f"@{commit} (rebasing)" if rebasing else f"@{commit}",
     )
@@ -322,15 +283,14 @@ class PullRequestCache(TypedDict):
 
 
 def open_pull_request(root: Path, branch: str) -> PullRequest | None:
-    """Returns the cached open pull request for the branch, and refreshes the cache in the background when it is stale."""
+    """Return the cached pull request, refreshing stale data in the background."""
     path = _cache_path(root, branch)
     cache = (
         cast(PullRequestCache, json.loads(path.read_text())) if path.exists() else None
     )
     cached = cache["pull_request"] if cache else None
     if cache is None or time.time() - cache["checked_at"] > PULL_REQUEST_CACHE_SECONDS:
-        # Mark the entry as checked first, so that the runs that follow while
-        # the lookup is running don't start more lookups
+        # Mark the cache first so overlapping runs do not launch duplicate lookups.
         _write_cache(
             path, PullRequestCache(checked_at=time.time(), pull_request=cached)
         )
@@ -398,19 +358,15 @@ def _write_cache(path: Path, cache: PullRequestCache) -> None:
     _ = temporary.replace(path)
 
 
-def display_folders(cwd: Path, home: Path) -> list[str]:
-    for root in STRIPPED_ROOTS:
-        base = home / root
-        if cwd.is_relative_to(base) and cwd != base:
-            folders = list(cwd.relative_to(base).parts)
-            break
+def display_folders(cwd: Path, home: Path, git: GitState | None) -> list[str]:
+    if git is not None:
+        folders = [*git.display_root, *cwd.resolve().relative_to(git.root).parts]
+    elif cwd.is_relative_to(home):
+        folders = ["~", *cwd.relative_to(home).parts]
+    elif cwd == Path(cwd.anchor):
+        folders = ["/"]
     else:
-        if cwd.is_relative_to(home):
-            folders = ["~", *cwd.relative_to(home).parts]
-        elif cwd == Path(cwd.anchor):
-            folders = ["/"]
-        else:
-            folders = ["", *cwd.parts[1:]]
+        folders = ["", *cwd.parts[1:]]
     if len(folders) > MAX_WHOLE_FOLDERS:
         folders = [*folders[:2], *map(_abbreviate, folders[2:-2]), *folders[-2:]]
     return folders
@@ -439,8 +395,7 @@ def right_spans(session: Session, *, with_effort: bool) -> list[Span]:
     return spans
 
 
-# The colours the context fade passes through, as how far along the fade each
-# one is and the RGB values of 256-colour 244, 208 and 167
+# Gradient stops as (position, RGB), matching palette colours 244, 208 and 167.
 CONTEXT_FADE_STOPS = (
     (0.0, (128, 128, 128)),
     (0.5, (255, 135, 0)),
@@ -451,15 +406,13 @@ CUBE_LEVELS = (0, 95, 135, 175, 215, 255)
 
 
 def _context_colour(percent: float) -> str:
-    # An exponential curve, so the colour barely moves until the context is
-    # nearly full, then rises quickly through orange to red
     progress = min(max(percent / CONTEXT_FULL_PERCENT, 0), 1)
     weight = math.expm1(CONTEXT_CURVE * progress) / math.expm1(CONTEXT_CURVE)
     return f"38;5;{_nearest_256_colour(_fade(weight))}"
 
 
 def _fade(weight: float) -> tuple[float, ...]:
-    """Returns the RGB values weight of the way along the context fade."""
+    """Interpolate the gradient at weight, from 0 to 1."""
     for (start, start_rgb), (end, end_rgb) in pairwise(CONTEXT_FADE_STOPS):
         if weight <= end:
             t = (weight - start) / (end - start)
@@ -470,7 +423,7 @@ def _fade(weight: float) -> tuple[float, ...]:
 
 
 def _nearest_256_colour(rgb: tuple[float, ...]) -> int:
-    """Returns the 256-colour index closest to rgb, from the colour cube or the gray ramp."""
+    """Find the nearest colour in the 256-colour cube or gray ramp."""
     cube = {
         16 + 36 * r + 6 * g + b: (CUBE_LEVELS[r], CUBE_LEVELS[g], CUBE_LEVELS[b])
         for r in range(6)
@@ -492,7 +445,7 @@ def render_line(
 ) -> str:
     width = session.width
     gap = MIN_GAP if right_aligned else _width([SEPARATOR])
-    folders = display_folders(session.cwd, home)
+    folders = display_folders(session.cwd, home, git)
     last_folder_only = ["…", folders[-1]] if len(folders) > 1 else folders
     candidates = [
         (folders, True, False, pull_request),
@@ -549,7 +502,7 @@ def _left_spans(
     budget: int,
     shorten_branch: bool,
 ) -> list[Span] | None:
-    """Returns the left side if it fits in the budget, shortening the branch name if allowed."""
+    """Fit the left side within the column budget, optionally shortening the branch."""
     path = path_spans(folders)
     if ref is None:
         return path if _width(path) <= budget else None

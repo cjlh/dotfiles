@@ -1,10 +1,8 @@
-# A watcher that sandbox.sh adds to every sandbox, so that errors logged by the
-# config's Python code reach the instance's log (instance.sh log).
+# Route Python config errors to the sandbox instance log.
 #
-# kitty sends log_error to macOS's unified log rather than stderr when Launch
-# Services starts it, which is how instance.sh starts it. kitty's log_error
-# writes through its redirect attribute when one is set, so set one that writes
-# to stderr. Errors logged by kitty's C code still go to the unified log.
+# Launch Services sends kitty errors to macOS's unified log. Redirect Python
+# errors to stderr so instance.sh can capture them. C errors still use the
+# unified log.
 
 import sys
 

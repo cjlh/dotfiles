@@ -1,9 +1,7 @@
-# A kitten that dumps the text of each OS window's tab bar as JSON, one string
-# per OS window, for checking what a custom tab bar (tab_bar.py) draws.
+# Dump tab bar text as JSON, one string per OS window.
 #
-# The tab bar is drawn first, with kitty's own code path, as kitty does not
-# render windows that are hidden, which instances started by instance.sh are.
-# Without it the text is whatever was last drawn, often nothing.
+# Force a redraw first: hidden test windows do not render automatically, so
+# their existing tab bar text may be stale or empty.
 #
 # Usage: instance.sh rc <sandbox> kitten /path/to/tab_bar_text.py <output.json>
 

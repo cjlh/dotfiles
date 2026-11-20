@@ -1,12 +1,7 @@
 # Custom kitten generated using Claude.
 #
-# Lists the icons namer picks from, for the active tab's icon to be chosen from
-# them, keeping its name. namer caches the choice for the tab's name, so that it
-# is kept until the tab is renamed or its icon picked anew. Tabs that haven't
-# been renamed have no icon, and are refused with a bell, as are tabs being
-# named.
-#
-# Enable with: map ctrl+alt+shift+o kitten choose_tab_icon.py
+# Choose an icon for a named tab and cache the choice in namer.
+# Tabs without a custom name, or still being named, cannot use the picker.
 
 from __future__ import annotations
 
@@ -25,12 +20,10 @@ from kitty.utils import log_error
 if TYPE_CHECKING:
     from kitty.boss import Boss
 
-# Set on tabs to the name they were given and the icon chosen for it. Must match
-# REPICK_ICON_ATTR in tab_bar.py.
+# Attribute names shared with tab_bar.py and name_tab.py. The picker supplies
+# the chosen (name, icon) pair and reads the current icon and naming state.
 REPICK_ICON_ATTR = "tab_bar_repick_icon"
-# The icon tab_bar.py shows for a tab. Must match TAB_ICON_ATTR there.
 TAB_ICON_ATTR = "tab_bar_icon"
-# Set on tabs while name_tab.py names them. Must match NAMING_ATTR there.
 NAMING_ATTR = "name_tab_previous_name"
 
 # kitty may be launched from the Dock without Homebrew or ~/.local/bin in PATH,
@@ -108,7 +101,7 @@ def handle_result(
 
         def chosen(icon_id: str | None) -> None:
             tab = boss.tab_for_id(tab_id)
-            # Keep names given while choosing
+            # Discard the choice if the tab was renamed while the picker was open.
             if icon_id not in icons or tab is None or tab.name != name:
                 return
             setattr(tab, REPICK_ICON_ATTR, (name, icons[icon_id][0]))
@@ -126,9 +119,8 @@ def handle_result(
                 ),
             )
 
-        # Each icon by the first of its meanings, to fit as many lines as
-        # possible in short windows, as the list can't scroll. The current icon
-        # is listed but can't be chosen.
+        # Shorten descriptions because the picker cannot scroll in short windows.
+        # Show the current icon for reference, without making it selectable.
         boss.choose_entry(
             f"Choose the icon for: {name}",
             (

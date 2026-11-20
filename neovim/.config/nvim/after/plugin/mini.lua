@@ -1,4 +1,3 @@
--- Hide hidden directories, but keep hidden files
 local function hide_hidden_dirs(fs_entry)
     return not (fs_entry.fs_type == 'directory' and vim.startswith(fs_entry.name, '.'))
 end
@@ -7,17 +6,16 @@ local function show_all()
     return true
 end
 
--- https://github.com/nvim-mini/mini.nvim/blob/main/readmes/mini-files.md
 require('mini.files').setup {
     windows = { preview = true, width_preview = 50 },
     content = { filter = hide_hidden_dirs },
 }
 
--- mini.files doesn't expose the options of the open explorer, so track which filter it uses here
+-- Track the filter ourselves because mini.files doesn't expose the options of the open explorer.
 local showing_hidden_dirs = false
 
--- Open the explorer, or close it if it is already open with the same filter. If it is open with
--- the other filter, switch filters in place so the explorer keeps its directory and cursor.
+-- Switch filters in place to preserve the directory and cursor position.
+-- Repeating the same shortcut closes the explorer.
 ---@param show_hidden_dirs boolean
 local function toggle_mini_files(show_hidden_dirs)
     local opts = { content = { filter = show_hidden_dirs and show_all or hide_hidden_dirs } }
@@ -63,7 +61,6 @@ vim.api.nvim_create_autocmd('User', {
     callback = function(args)
         local buf_id = args.data.buf_id
         vim.keymap.set('n', '<Esc>', MiniFiles.close, { buffer = buf_id, desc = 'Close mini.files' })
-        -- Same as the default `L`: open a file and close the explorer, or enter a directory
         vim.keymap.set('n', '<CR>', function()
             MiniFiles.go_in { close_on_file = true }
         end, { buffer = buf_id, desc = 'Open file and close mini.files' })
@@ -76,7 +73,7 @@ require('mini.completion').setup {}
 -- Only used for nvim-scrollbar diff markers
 require('mini.diff').setup {}
 
--- Only used for LSP snippets currently
+-- Expand snippets from LSP completion.
 require('mini.snippets').setup {
     mappings = {
         jump_next = '<Tab>',

@@ -81,7 +81,6 @@ def run(
     env = {name: value for name, value in os.environ.items() if name != "COLUMNS"} | {
         "HOME": str(home),
         "XDG_CACHE_HOME": str(home / ".cache"),
-        # Puts the fake gh first
         "PATH": f"{home / 'bin'}{os.pathsep}{os.environ['PATH']}",
     }
     if columns is not None:
@@ -97,7 +96,7 @@ def run(
 
 
 def visible(result: subprocess.CompletedProcess[str]) -> str:
-    """Returns the printed line without escape codes, after checking that it is one line."""
+    """Check for successful single-line output and strip terminal escapes."""
     assert result.returncode == 0, result.stderr
     line = ESCAPES.sub("", result.stdout.removesuffix("\n"))
     assert "\n" not in line
@@ -105,14 +104,14 @@ def visible(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def status_line(payload: Payload, *, home: Path, columns: int) -> str:
-    """Returns Claude Code's line, after checking that it fills the space Claude Code gives it."""
+    """Check that Claude Code's status line fills the available width."""
     line = visible(run("claude", payload, home=home, columns=columns))
     assert len(line) == max(0, columns - CLAUDE_INSET)
     return line
 
 
 def cursor_line(payload: Payload, *, home: Path) -> str:
-    """Returns Cursor's line, after checking that it fits in the space Cursor gives it."""
+    """Check that Cursor's status line fits the available width."""
     line = visible(run("cursor", payload, home=home))
     assert len(line) <= cast(int, payload["render_width_chars"])
     return line
@@ -156,9 +155,16 @@ def make_repo(path: Path, branch: str) -> Path:
     return path
 
 
+def make_worktree(path: Path, branch: str) -> Path:
+    primary = make_repo(path.parent, "primary")
+    linked = primary.parent / "checkouts" / path.name
+    git(primary, "worktree", "add", "-b", branch, str(linked))
+    return linked
+
+
 @dataclass(frozen=True)
 class FakeGh:
-    """A gh on PATH that records its arguments and prints a set list of pull requests."""
+    """Record gh calls and return a configurable list of pull requests."""
 
     calls: Path
     response: Path
@@ -190,8 +196,8 @@ def gh(home: Path) -> FakeGh:
     return fake
 
 
-def test_shows_worktree_under_work_with_branch_and_model(home: Path) -> None:
-    repo = make_repo(home / "Work/ExampleProject/main", "fix-1234-new-label")
+def test_shows_worktree_with_branch_and_model(home: Path) -> None:
+    repo = make_worktree(home / "projects/ExampleProject/main", "fix-1234-new-label")
 
     line = status_line(claude_payload(repo), home=home, columns=100)
 
@@ -199,8 +205,14 @@ def test_shows_worktree_under_work_with_branch_and_model(home: Path) -> None:
     assert line.endswith("  Opus 5.5 (high) · 38%")
 
 
+def test_default_keeps_home_relative_path(home: Path) -> None:
+    cwd = home / "Work/app"
+    cwd.mkdir(parents=True)
+    assert status_line(claude_payload(cwd), home=home, columns=100).startswith("~/Work/app  ")
+
+
 def test_shows_config_repos_without_their_parent_folders(home: Path) -> None:
-    repo = make_repo(home / "Documents/Config/dotfiles", "example")
+    repo = make_repo(home / "nested/src/dotfiles", "example")
     (repo / "kitty").mkdir()
 
     line = status_line(claude_payload(repo / "kitty"), home=home, columns=100)
@@ -212,11 +224,11 @@ def test_shows_config_repos_without_their_parent_folders(home: Path) -> None:
     ("relative", "expected"),
     [
         ("Downloads", "~/Downloads"),
-        ("Work/app/main/src/app", "app/main/src/app"),
-        ("Work/app/main/src/app/commands", "app/main/src/app/commands"),
+        ("projects/app/main/src/app", "~/projects/a/m/src/app"),
+        ("projects/app/main/src/app/commands", "~/projects/a/m/s/app/commands"),
         (
-            "Work/ExampleProject/main/src/feature/stages/utilities",
-            "ExampleProject/main/s/f/stages/utilities",
+            "projects/ExampleProject/main/src/feature/stages/utilities",
+            "~/projects/E/m/s/f/stages/utilities",
         ),
         ("Documents/a/.config/b/c/d", "~/Documents/a/.c/b/c/d"),
     ],
@@ -240,7 +252,7 @@ def test_shows_paths_outside_home_from_the_root(home: Path) -> None:
 
 @pytest.mark.parametrize("folder", ["repo", "repo with spaces", "repo\nwith\ttabs"])
 def test_shows_commit_when_head_is_detached(home: Path, folder: str) -> None:
-    repo = make_repo(home / "Work" / folder / "main", "main")
+    repo = make_worktree(home / "projects" / folder / "main", "main")
     commit = git_stdout(repo, "rev-parse", "--short", "HEAD")
     git(repo, "checkout", "--detach")
 
@@ -283,7 +295,7 @@ def test_sanitizes_terminal_controls_before_fitting_the_line(
 
 
 def test_shows_when_a_rebase_is_in_progress(home: Path) -> None:
-    repo = make_repo(home / "Work/repo/main", "main")
+    repo = make_worktree(home / "projects/repo/main", "main")
     git(repo, "commit", "--allow-empty", "--message", "Second commit")
     git(repo, "checkout", "--quiet", "-b", "feature", "HEAD~1")
     _ = (repo / "file").write_text("feature\n")
@@ -304,13 +316,13 @@ def test_shows_when_a_rebase_is_in_progress(home: Path) -> None:
 
 
 def test_shows_branch_of_repo_without_commits(home: Path) -> None:
-    repo = home / "Work/repo/main"
+    repo = home / "projects/repo/main"
     repo.mkdir(parents=True)
     git(repo, "init", "--initial-branch", "first")
 
     line = status_line(claude_payload(repo), home=home, columns=100)
 
-    assert line.startswith("repo/main · first  ")
+    assert line.startswith("main · first  ")
 
 
 def test_leaves_out_effort_and_context_when_claude_does(home: Path) -> None:
@@ -362,8 +374,8 @@ def test_colours_context_use_by_how_full_it_is(
 def test_drops_parts_in_order_as_the_terminal_narrows(
     home: Path, width: int, expected_left: str, expected_right: str
 ) -> None:
-    repo = make_repo(
-        home / "Work/ExampleProject/main", "fix-1234-new-label-in-glossary"
+    repo = make_worktree(
+        home / "projects/ExampleProject/main", "fix-1234-new-label-in-glossary"
     )
 
     line = status_line(
@@ -375,8 +387,8 @@ def test_drops_parts_in_order_as_the_terminal_narrows(
 
 
 def test_fits_every_width_on_one_line(home: Path) -> None:
-    repo = make_repo(
-        home / "Work/ExampleProject/main", "fix-1234-new-label-in-glossary"
+    repo = make_worktree(
+        home / "projects/ExampleProject/main", "fix-1234-new-label-in-glossary"
     )
     payload = claude_payload(repo / "src" / "feature" / "stages", context=62)
     (repo / "src" / "feature" / "stages").mkdir(parents=True)
@@ -394,7 +406,7 @@ def test_fails_without_terminal_width_from_claude(home: Path) -> None:
 
 def test_never_looks_up_pull_requests_for_claude(home: Path, gh: FakeGh) -> None:
     gh.respond_with([PULL_REQUEST])
-    repo = make_repo(home / "Work/repo/main", "feature")
+    repo = make_worktree(home / "projects/repo/main", "feature")
 
     line = status_line(claude_payload(repo), home=home, columns=100)
     time.sleep(1)
@@ -427,7 +439,7 @@ def test_shows_open_pull_request_for_cursor_once_looked_up(
     home: Path, gh: FakeGh
 ) -> None:
     gh.respond_with([PULL_REQUEST])
-    repo = make_repo(home / "Work/repo/main", "feature")
+    repo = make_worktree(home / "projects/repo/main", "feature")
     payload = cursor_payload(repo)
 
     first = cursor_line(payload, home=home)
@@ -447,7 +459,7 @@ def test_shows_open_pull_request_for_cursor_once_looked_up(
 
 
 def test_looks_up_pull_request_once_per_minute(home: Path, gh: FakeGh) -> None:
-    repo = make_repo(home / "Work/repo/main", "feature")
+    repo = make_worktree(home / "projects/repo/main", "feature")
     payload = cursor_payload(repo)
 
     for _ in range(5):
@@ -479,8 +491,8 @@ def test_keeps_cursor_line_left_aligned_and_drops_pull_request_last(
     home: Path, gh: FakeGh, width: int, expected: str
 ) -> None:
     gh.respond_with([PULL_REQUEST])
-    repo = make_repo(
-        home / "Work/ExampleProject/main", "fix-1234-new-label-in-glossary"
+    repo = make_worktree(
+        home / "projects/ExampleProject/main", "fix-1234-new-label-in-glossary"
     )
     _ = cursor_line(cursor_payload(repo), home=home)
     wait_for(lambda: "#1234" in cursor_line(cursor_payload(repo), home=home))

@@ -1,11 +1,10 @@
-# Per-machine tab bar settings for tab_bar.py.
+# Per-machine tab bar settings.
 # Status items appear at the right of the tab bar in the order listed.
 #
-# Copy this file to tab_bar.toml and modify as desired. Changes take effect when
-# kitty's config is reloaded.
+# Copy to tab_bar.toml and reload kitty's config after editing.
 
 [tabs]
-# When windows are stacked, the parent tab contains an overview of their status
+# Show a marker for each stacked window, highlighting the active one.
 #
 # Examples (inactive, active, separator):
 #   Small squares:   "▫", "▪", ""
@@ -18,32 +17,30 @@ inactive-stacked-window-indicator = "▫"
 active-stacked-window-indicator = "▪"
 stacked-window-indicator-separator = ""
 
-# Colours of tabs with a program that is blocked on the user, or that failed,
-# as reported by programs such as Claude Code and Codex. Colours are "#rrggbb",
-# or a colour name kitty knows. Tabs with a program that finished, or that rang
-# the bell, use active_border_color from kitty's theme. These are the colours of
-# the active tab. Inactive tabs use a dimmed variant of them.
+# Highlight tabs when a program needs input or fails. Use "#rrggbb" or a kitty
+# colour name. Inactive tabs use dimmer colours. Completed programs and bells
+# use the theme's active_border_color.
 blocked-tab-color = "#de7500"
 error-tab-color = "#c90a0a"
 
-# Arbitrary status providers can be configured using the provider list. Each [[provider]]
-# entry has a unique name, of letters, digits, "-" and "_". The name "disk" is the
-# built-in available disk space indicator, which takes no other keys.
+# Each [[provider]] needs a unique name containing letters, digits, "-" or "_".
+# The built-in "disk" provider shows available space and takes no other keys.
 #
-# Any other provider takes:
+# Command providers accept:
 #
-#   command   Program and arguments printing the item's data as JSON, required.
-#             Run in this directory every interval, in the background, with
-#             "kitty" being the running kitty. If it fails the last data stays.
+#   command   Required program and arguments; prints JSON to stdout.
+#             Runs in this config directory, in the background, every interval.
+#             "kitty" resolves to the running executable. Failed runs keep
+#             the last successful result.
 #   format    How the data is shown after the icon:
 #             "text" (default)  {"text": "12 EUR"}
 #             "usage"           {"session": {"percent": 27.0, "resets_at": 1794595800},
 #                                "weekly": {"percent": 6.0, "resets_at": null}}
-#                               shown as "27/6" (session/weekly), with weekly
-#                               shown once it reaches weekly_threshold. Each
-#                               resets_at is in seconds since the epoch, after
-#                               which that percentage is taken to be 0.
-#             Either way, data of null hides the item.
+#                               Displays "27/6" (session/weekly). Weekly usage
+#                               appears once it reaches weekly_threshold.
+#                               resets_at is a Unix timestamp, or null if unknown.
+#                               Usage is treated as zero after that time.
+#             JSON null hides the item in either format.
 #   icon      Shown before the data, default none.
 #   interval  Seconds between runs of command, default 180.
 #   timeout   Seconds before a run of command is killed, default 60.

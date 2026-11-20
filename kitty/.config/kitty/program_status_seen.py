@@ -1,15 +1,10 @@
 # Custom kitten generated using Claude.
 #
-# Marks a program's status as seen when it reports it in the window the user is
-# looking at. Programs such as Claude Code and Codex report whether they are
-# working, waiting on the user, done or failed with OSC 7501, and kitty keeps
-# "done" and "error" until the user has seen them. kitty only counts them as
-# seen when the window gains focus though, so a program that finishes while the
-# user watches it would stay "done", and tab_bar.py would colour its tab as
-# soon as the user left it.
+# Clear completion and error statuses reported while the user is watching.
+# kitty normally clears them when the window gains focus, so a task that
+# finishes in an already-focused window can otherwise keep its status.
 #
-# Requires kitty >= 0.50.0, does nothing on older versions.
-#
+# Requires kitty >= 0.50.0.
 # Enable with: watcher program_status_seen.py
 
 from __future__ import annotations
@@ -24,8 +19,7 @@ if TYPE_CHECKING:
 
 
 def _is_seen(boss: Boss, window: Window) -> bool:
-    # While kitty is in the background, its active window is that of the OS
-    # window focused last, which the user can't see
+    # kitty retains an active window even when the application is in the background.
     return (
         not window.destroyed
         and window.os_window_id == current_focused_os_window_id()
@@ -34,8 +28,7 @@ def _is_seen(boss: Boss, window: Window) -> bool:
 
 
 def on_program_status_change(boss: Boss, window: Window, data: dict[str, Any]) -> None:
-    # kitty calls this while it parses the program's output, so mark the
-    # status as seen afterwards
+    # Wait until kitty has finished parsing the output before clearing the status.
     def mark_seen(timer_id: int | None = None) -> None:
         if _is_seen(boss, window):
             window.program_status_seen_by_user()
