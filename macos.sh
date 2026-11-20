@@ -25,6 +25,9 @@ defaults write com.apple.screencaptureui "thumbnailExpiration" -float 300 && kil
 # Allow dragging windows from arbitrary pointer locations with cmd+ctrl
 defaults write -g NSWindowShouldDragOnGesture -bool true
 
+# Open new documents in tabs of existing windows
+defaults write com.apple.Preview AppleWindowTabbingMode -string always
+
 # -- App-specific config
 
 # Use cmd+shift+x for strikethrough in Stickies.app
