@@ -46,7 +46,7 @@ vim.pack.add {
 -- Git
 vim.pack.add {
     'https://github.com/tpope/vim-fugitive',
-    'https://github.com/sindrets/diffview.nvim',
+    'https://github.com/esmuellert/codediff.nvim',
     'https://github.com/lewis6991/gitsigns.nvim',
     'https://github.com/rbong/vim-flog',
 }
