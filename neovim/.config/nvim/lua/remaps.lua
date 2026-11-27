@@ -70,6 +70,16 @@ vim.keymap.set('i', '<C-c>', '<Esc>')
 -- Match macOS opt+backspace
 vim.keymap.set('i', '<M-BS>', '<C-w>', { desc = 'Delete word before cursor' })
 
+-- Smart home: go to first non-blank, or column 0 if already there
+local function smart_home(prefix)
+    return function()
+        local first = vim.fn.match(vim.fn.getline '.', '\\S') + 1
+        return prefix .. (vim.fn.col '.' == first and '0' or '^')
+    end
+end
+vim.keymap.set({ 'n', 'x', 'o' }, '<Home>', smart_home '', { expr = true, desc = 'Smart home' })
+vim.keymap.set('i', '<Home>', smart_home '<C-o>', { expr = true, desc = 'Smart home' })
+
 vim.keymap.set('n', '<leader>s', ':%s/', { desc = 'Begin grep in file' })
 
 vim.keymap.set('n', '<leader>v', 'vin', { remap = true, desc = 'Select word/symbol under cursor' })
