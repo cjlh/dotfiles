@@ -3,6 +3,7 @@
 
 import colorsys
 import json
+import math
 import os
 import re
 import shutil
@@ -499,7 +500,24 @@ class UsageProvider(CommandProvider):
         text = f"{session}"
         if weekly >= self.weekly_threshold:
             text += f"/{weekly}"
+        remaining = self._session_time_left(data["session"], now)
+        if remaining:
+            text += f" ({remaining})"
         return text
+
+    @staticmethod
+    def _session_time_left(window, now: float) -> str:
+        """Time until the session resets, rounded up to the minute, once less
+        than half the window remains."""
+        resets_at = window["resets_at"]
+        length = window.get("window")  # missing from caches of older versions
+        if resets_at is None or length is None:
+            return ""
+        left = resets_at - now
+        if left <= 0 or left >= length / 2:
+            return ""
+        hours, minutes = divmod(math.ceil(left / 60), 60)
+        return f"{hours}h{minutes:02}" if hours else f"{minutes}m"
 
     @staticmethod
     def _used_percent(window, now: float) -> int:

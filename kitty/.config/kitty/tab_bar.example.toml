@@ -34,12 +34,17 @@ error-tab-color = "#c90a0a"
 #             the last successful result.
 #   format    How the data is shown after the icon:
 #             "text" (default)  {"text": "12 EUR"}
-#             "usage"           {"session": {"percent": 27.0, "resets_at": 1794595800},
+#             "usage"           {"session": {"percent": 27.0, "resets_at": 1794595800,
+#                                            "window": 18000},
 #                                "weekly": {"percent": 6.0, "resets_at": null}}
 #                               Displays "27/6" (session/weekly). Weekly usage
 #                               appears once it reaches weekly_threshold.
 #                               resets_at is a Unix timestamp, or null if unknown.
 #                               Usage is treated as zero after that time.
+#                               window is the limit's length in seconds,
+#                               optional. Once less than half the session
+#                               window remains, the time left is appended, as
+#                               in "27/6 (1h45)" or "27/6 (10m)".
 #             JSON null hides the item in either format.
 #   icon      Shown before the data, default none.
 #   interval  Seconds between runs of command, default 180.

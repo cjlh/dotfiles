@@ -5,11 +5,11 @@
 #
 #   kitty +launch agent_usage.py claude|codex
 #
-# The output is JSON, with each window's reset time in seconds since the epoch,
-# or null when unknown:
+# The output is JSON, with each window's reset time in seconds since the epoch
+# and its length in seconds (null when unknown):
 #
-#   {"session": {"percent": 27.0, "resets_at": 1794595800.4},
-#    "weekly": {"percent": 6.0, "resets_at": 1794826800.4}}
+#   {"session": {"percent": 27.0, "resets_at": 1794595800.4, "window": 18000},
+#    "weekly": {"percent": 6.0, "resets_at": 1794826800.4, "window": 604800}}
 #
 # Use the same interfaces as the agents' own usage screens. Unexpected data
 # produces null; connection or authentication failures exit with status 1.
@@ -29,6 +29,9 @@ CLAUDE_CREDENTIALS_PATH = os.path.expanduser("~/.claude/.credentials.json")
 CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 # Windows no longer than this many minutes are session limits, others weekly
 CODEX_MAX_SESSION_WINDOW = 24 * 60
+# Lengths of Claude's windows in seconds, as its API names but doesn't report them
+CLAUDE_SESSION_WINDOW = 5 * 60 * 60
+CLAUDE_WEEKLY_WINDOW = 7 * 24 * 60 * 60
 
 
 def _claude_access_token() -> str:
@@ -49,13 +52,17 @@ def _claude_access_token() -> str:
     return json.loads(credentials)["claudeAiOauth"]["accessToken"]
 
 
-def _claude_window(window) -> dict:
+def _claude_window(window, length: int) -> dict:
     if window is None:  # nothing has been used
-        return {"percent": 0, "resets_at": None}
+        return {"percent": 0, "resets_at": None, "window": length}
     resets_at = window["resets_at"]
     if resets_at is not None:
         resets_at = datetime.fromisoformat(resets_at).timestamp()
-    return {"percent": float(window["utilization"]), "resets_at": resets_at}
+    return {
+        "percent": float(window["utilization"]),
+        "resets_at": resets_at,
+        "window": length,
+    }
 
 
 def _claude_usage() -> dict:
@@ -74,8 +81,8 @@ def _claude_usage() -> dict:
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         usage = json.load(response)
     return {
-        "session": _claude_window(usage["five_hour"]),
-        "weekly": _claude_window(usage["seven_day"]),
+        "session": _claude_window(usage["five_hour"], CLAUDE_SESSION_WINDOW),
+        "weekly": _claude_window(usage["seven_day"], CLAUDE_WEEKLY_WINDOW),
     }
 
 
@@ -129,8 +136,8 @@ def _codex_rate_limits() -> dict:
 def _codex_usage() -> dict:
     limits = _codex_rate_limits()["rateLimits"]
     usage = {
-        "session": {"percent": 0, "resets_at": None},
-        "weekly": {"percent": 0, "resets_at": None},
+        "session": {"percent": 0, "resets_at": None, "window": None},
+        "weekly": {"percent": 0, "resets_at": None, "window": None},
     }
     # Which of the two is the session limit depends on the plan
     for window in (limits["primary"], limits["secondary"]):
@@ -140,6 +147,7 @@ def _codex_usage() -> dict:
         usage["session" if is_session else "weekly"] = {
             "percent": float(window["usedPercent"]),
             "resets_at": window["resetsAt"],
+            "window": window["windowDurationMins"] * 60,
         }
     return usage
 
